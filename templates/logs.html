@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+
+{% block title %}提取记录 - QRCode-RS{% endblock %}
+{% block body_class %}body-admin{% endblock %}
+{% block layout_class %}page-admin{% endblock %}
+
+{% block content %}
+<nav class="topbar">
+    <div class="topbar-inner">
+        <div class="topbar-brand">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="3" height="3"/><line x1="21" y1="14" x2="21" y2="17"/><line x1="14" y1="21" x2="17" y2="21"/>
+            </svg>
+            <span>QRCode-RS</span>
+        </div>
+        <div class="topbar-actions">
+            <span class="topbar-user">{{ username }}</span>
+            <a href="{{ base }}/logout" class="btn btn-ghost btn-sm">退出</a>
+        </div>
+    </div>
+</nav>
+
+<main class="admin-main fade-in">
+    <div class="admin-header">
+        <h1>提取记录</h1>
+        <a href="{{ base }}/?page={{ list_page }}{% if list_keyword %}&keyword={{ list_keyword }}{% endif %}" class="btn btn-outline">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+            返回列表
+        </a>
+    </div>
+
+    <div class="admin-card">
+        <div class="card-toolbar">
+            <div style="display:flex;gap:2rem;flex-wrap:wrap;font-size:0.9rem;">
+                <span><strong>文字内容：</strong>{{ record.text_content | truncate(length=60) }}</span>
+                <span><strong>备注：</strong>{{ record.remark | default(value="-") }}</span>
+                <span><strong>已用/最大：</strong>{{ record.used_count }} / {{ record.max_count }}</span>
+            </div>
+        </div>
+
+        <div class="table-wrap">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>提取时间</th>
+                        <th>客户端 IP</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for log in logs %}
+                    <tr>
+                        <td class="cell-time">{{ log.extracted_at }}</td>
+                        <td class="cell-mono">{{ log.client_ip }}</td>
+                    </tr>
+                    {% endfor %}
+                    {% if logs | length == 0 %}
+                    <tr><td colspan="2" class="cell-empty">
+                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.3"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                        <span>暂无提取记录</span>
+                    </td></tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+
+        {% if total_pages > 1 %}
+        <div class="pagination" id="pagination" data-page="{{ page }}" data-total="{{ total_pages }}"></div>
+        <script>
+        (function() {
+            var el = document.getElementById('pagination');
+            var cur = parseInt(el.dataset.page);
+            var total = parseInt(el.dataset.total);
+            var base = '{{ base | safe }}';
+            var uuid = '{{ record.uuid | safe }}';
+            var lp = '{{ list_page }}';
+            var lk = '{{ list_keyword | safe }}';
+            function href(p) {
+                var s = base + '/logs/' + uuid + '?page=' + p + '&list_page=' + lp;
+                if (lk) s += '&list_keyword=' + encodeURIComponent(lk);
+                return s;
+            }
+            var html = '';
+            html += '<a class="page-btn' + (cur <= 1 ? ' disabled' : '') + '" href="' + (cur > 1 ? href(cur - 1) : '#') + '" title="上一页">&lsaquo;</a>';
+            var pages = [];
+            pages.push(1);
+            var lo = Math.max(2, cur - 2), hi = Math.min(total - 1, cur + 2);
+            if (lo > 2) pages.push('...');
+            for (var i = lo; i <= hi; i++) pages.push(i);
+            if (hi < total - 1) pages.push('...');
+            if (total > 1) pages.push(total);
+            for (var j = 0; j < pages.length; j++) {
+                var p = pages[j];
+                if (p === '...') {
+                    html += '<span class="page-ellipsis">...</span>';
+                } else {
+                    html += '<a class="page-btn' + (p === cur ? ' active' : '') + '" href="' + href(p) + '">' + p + '</a>';
+                }
+            }
+            html += '<a class="page-btn' + (cur >= total ? ' disabled' : '') + '" href="' + (cur < total ? href(cur + 1) : '#') + '" title="下一页">&rsaquo;</a>';
+            html += '<span class="page-sep"></span>';
+            html += '<span class="page-jump">跳至 <input type="number" id="jumpInput" min="1" max="' + total + '" value="' + cur + '"> 页 <button class="page-jump-btn" id="jumpBtn">GO</button></span>';
+            el.innerHTML = html;
+            var jumpInput = document.getElementById('jumpInput');
+            var jumpBtn = document.getElementById('jumpBtn');
+            function doJump() {
+                var v = parseInt(jumpInput.value);
+                if (v >= 1 && v <= total && v !== cur) window.location.href = href(v);
+            }
+            jumpBtn.addEventListener('click', doJump);
+            jumpInput.addEventListener('keydown', function(e) { if (e.key === 'Enter') doJump(); });
+        })();
+        </script>
+        {% endif %}
+    </div>
+</main>
+{% endblock %}
