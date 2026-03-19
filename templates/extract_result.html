@@ -15,8 +15,13 @@
     </div>
 
     <div class="result-content">
-        <p class="result-text">{{ text_content }}</p>
+        <p class="result-text" id="resultText">{{ text_content }}</p>
     </div>
+
+    <button class="btn btn-primary btn-copy" id="copyBtn" onclick="(function(){var t=document.getElementById('resultText').innerText;navigator.clipboard.writeText(t).then(function(){var b=document.getElementById('copyBtn');b.textContent='已复制';b.classList.add('btn-copied');setTimeout(function(){b.innerHTML='<svg width=&quot;16&quot; height=&quot;16&quot; viewBox=&quot;0 0 24 24&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;2&quot;><rect x=&quot;9&quot; y=&quot;9&quot; width=&quot;13&quot; height=&quot;13&quot; rx=&quot;2&quot; ry=&quot;2&quot;/><path d=&quot;M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1&quot;/></svg> 复制内容';b.classList.remove('btn-copied');},1500)})})()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+        复制内容
+    </button>
 
     <div class="extract-meta">
         <div class="meta-row">
