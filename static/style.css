@@ -477,6 +477,10 @@ a:hover { color: var(--primary-dark); }
     box-shadow: var(--shadow-sm);
 }
 
+.action-btn-danger:hover {
+    color: var(--danger);
+}
+
 .cell-time {
     font-family: var(--font-mono);
     font-size: 12px;
@@ -693,7 +697,7 @@ a:hover { color: var(--primary-dark); }
 
 .extract-card {
     width: 100%;
-    max-width: 400px;
+    max-width: 480px;
     background: #fff;
     border-radius: var(--radius-lg);
     padding: 36px 28px;
@@ -844,6 +848,13 @@ a:hover { color: var(--primary-dark); }
 .extract-empty svg { display: block; margin: 0 auto 16px; }
 
 .extract-empty p { font-size: 15px; }
+
+.extract-contact {
+    text-align: center;
+    font-size: 13px;
+    color: var(--gray-400);
+    margin-top: 12px;
+}
 
 /* ==========================================
    Responsive
