@@ -35,7 +35,7 @@
                 <span><strong>文字内容：</strong>{{ display_text }}</span>
                 <span><strong>备注：</strong>{{ record.remark | default(value="-") }}</span>
                 <span><strong>总提取：</strong>{{ record.used_count }} 次</span>
-                <span><strong>每IP限额：</strong>{{ record.max_count }} 次</span>
+                <span><strong>总槽位数：</strong>{{ record.max_count }} 个</span>
             </div>
         </div>
 
@@ -45,6 +45,7 @@
                     <tr>
                         <th>提取时间</th>
                         <th>客户端 IP</th>
+                        <th>Browser ID</th>
                         <th>段落</th>
                     </tr>
                 </thead>
@@ -53,11 +54,12 @@
                     <tr>
                         <td class="cell-time">{{ log.extracted_at }}</td>
                         <td class="cell-mono">{{ log.client_ip }}</td>
+                        <td class="cell-mono">{{ log.browser_id }}</td>
                         <td>{% if log.segment_index is defined and log.segment_index is number %}第{{ log.segment_index + 1 }}段{% else %}-{% endif %}</td>
                     </tr>
                     {% endfor %}
                     {% if logs | length == 0 %}
-                    <tr><td colspan="3" class="cell-empty">
+                    <tr><td colspan="4" class="cell-empty">
                         <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.3"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
                         <span>暂无提取记录</span>
                     </td></tr>

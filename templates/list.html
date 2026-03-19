@@ -62,7 +62,7 @@
                         <td class="col-num">
                             <span class="badge {% if record.used_count > 0 %}badge-active{% else %}badge-idle{% endif %}">
                                 {{ record.used_count }}
-                            </span> 次 / 每IP {{ record.max_count }} 次
+                            </span> 次 / 最多 {{ record.max_count }} 次
                         </td>
                         <td class="cell-mono">{{ record.last_extract_ip | default(value="-") }}</td>
                         <td class="cell-time">{% if record.last_extract_at %}{{ record.last_extract_at }}{% else %}-{% endif %}</td>
