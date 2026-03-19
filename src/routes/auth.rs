@@ -39,8 +39,13 @@ pub async fn login_page(
         ctx.insert("error", &"用户名或密码错误");
     }
 
-    let rendered = tmpl.render("login.html", &ctx).unwrap();
-    HttpResponse::Ok().content_type("text/html").body(rendered)
+    match tmpl.render("login.html", &ctx) {
+        Ok(rendered) => HttpResponse::Ok().content_type("text/html").body(rendered),
+        Err(e) => {
+            log::warn!("Template render failed: login.html, error={e}");
+            HttpResponse::InternalServerError().body("Internal Server Error")
+        }
+    }
 }
 
 pub async fn login_handler(
@@ -55,7 +60,10 @@ pub async fn login_handler(
     if form.username == config.admin.username
         && bcrypt::verify(&form.password, &config.admin.password_hash).unwrap_or(false)
     {
-        session.insert("user", &form.username).unwrap();
+        if let Err(e) = session.insert("user", &form.username) {
+            log::warn!("Session insert failed: error={e}");
+            return HttpResponse::InternalServerError().body("Session error");
+        }
         log::info!("Login success: user={}, ip={client_ip}", form.username);
         HttpResponse::Found()
             .insert_header(("Location", format!("{base}/")))

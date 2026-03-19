@@ -25,12 +25,35 @@ fn verify_extract_hash(uuid: &str, hash: &str, salt: &str) -> bool {
     generate_extract_hash(uuid, salt) == hash
 }
 
+fn render_template(tmpl: &Tera, template: &str, ctx: &Context) -> HttpResponse {
+    match tmpl.render(template, ctx) {
+        Ok(rendered) => HttpResponse::Ok().content_type("text/html").body(rendered),
+        Err(e) => {
+            log::warn!("Template render failed: template={template}, error={e}");
+            HttpResponse::InternalServerError()
+                .content_type("text/plain")
+                .body("Internal Server Error")
+        }
+    }
+}
+
+fn render_template_with_status(tmpl: &Tera, template: &str, ctx: &Context, status: actix_web::http::StatusCode) -> HttpResponse {
+    match tmpl.render(template, ctx) {
+        Ok(rendered) => HttpResponse::build(status).content_type("text/html").body(rendered),
+        Err(e) => {
+            log::warn!("Template render failed: template={template}, error={e}");
+            HttpResponse::InternalServerError()
+                .content_type("text/plain")
+                .body("Internal Server Error")
+        }
+    }
+}
+
 fn render_error(tmpl: &Tera, base: &str, message: &str, status: actix_web::http::StatusCode) -> HttpResponse {
     let mut ctx = Context::new();
     ctx.insert("base", base);
     ctx.insert("message", message);
-    let rendered = tmpl.render("error.html", &ctx).unwrap();
-    HttpResponse::build(status).content_type("text/html").body(rendered)
+    render_template_with_status(tmpl, "error.html", &ctx, status)
 }
 
 #[derive(sqlx::FromRow, Serialize)]
@@ -86,7 +109,7 @@ pub async fn list_page(
 ) -> HttpResponse {
     let base = &config.server.context_path;
     let username = session.get::<String>("user").unwrap_or(None).unwrap_or_default();
-    let page = query.page.unwrap_or(1).max(1);
+    let page = query.page.unwrap_or(1).clamp(1, 100_000);
     let keyword = query.keyword.clone().unwrap_or_default();
     let offset = (page - 1) * PAGE_SIZE;
     log::debug!("list_page: page={page}, keyword={keyword:?}");
@@ -133,7 +156,7 @@ pub async fn list_page(
         (total, records)
     };
 
-    let total_pages = ((total as f64) / (PAGE_SIZE as f64)).ceil() as i64;
+    let total_pages = (total + PAGE_SIZE - 1) / PAGE_SIZE;
 
     let mut ctx = Context::new();
     ctx.insert("base", base);
@@ -143,8 +166,7 @@ pub async fn list_page(
     ctx.insert("total_pages", &total_pages);
     ctx.insert("keyword", &keyword);
 
-    let rendered = tmpl.render("list.html", &ctx).unwrap();
-    HttpResponse::Ok().content_type("text/html").body(rendered)
+    render_template(&tmpl, "list.html", &ctx)
 }
 
 pub async fn create_page(
@@ -159,29 +181,49 @@ pub async fn create_page(
     ctx.insert("base", base);
     ctx.insert("username", &username);
 
-    let rendered = tmpl.render("create.html", &ctx).unwrap();
-    HttpResponse::Ok().content_type("text/html").body(rendered)
+    render_template(&tmpl, "create.html", &ctx)
 }
 
 pub async fn create_handler(
     form: web::Form<CreateForm>,
+    tmpl: web::Data<Tera>,
     pool: web::Data<MySqlPool>,
     config: web::Data<Config>,
 ) -> HttpResponse {
     let base = &config.server.context_path;
+
+    let text_content = form.text_content.trim();
+    if text_content.is_empty() || text_content.len() > 5000 {
+        return render_error(
+            &tmpl,
+            base,
+            "文字内容不能为空且长度不能超过 5000 字符",
+            actix_web::http::StatusCode::BAD_REQUEST,
+        );
+    }
+
     let uuid = uuid::Uuid::new_v4().to_string();
-    let max_count = form.max_count.unwrap_or(5).max(1);
+    let max_count = form.max_count.unwrap_or(5).clamp(1, 10000);
     let remark = form.remark.as_deref().filter(|s| !s.trim().is_empty());
 
-    let _ = sqlx::query(
+    if let Err(e) = sqlx::query(
         "INSERT INTO qr_codes (uuid, text_content, remark, max_count, used_count, created_at) VALUES (?, ?, ?, ?, 0, NOW())",
     )
     .bind(&uuid)
-    .bind(&form.text_content)
+    .bind(text_content)
     .bind(remark)
     .bind(max_count)
     .execute(pool.get_ref())
-    .await;
+    .await
+    {
+        log::warn!("QR code insert failed: uuid={uuid}, error={e}");
+        return render_error(
+            &tmpl,
+            base,
+            "创建失败，请稍后重试",
+            actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
+        );
+    }
 
     log::info!("QR code created: uuid={uuid}, max_count={max_count}");
 
@@ -270,8 +312,7 @@ pub async fn extract_page(
     ctx.insert("created_at", &record.created_at.format("%Y-%m-%d %H:%M:%S").to_string());
     ctx.insert("remaining", &remaining);
 
-    let rendered = tmpl.render("extract.html", &ctx).unwrap();
-    HttpResponse::Ok().content_type("text/html").body(rendered)
+    render_template(&tmpl, "extract.html", &ctx)
 }
 
 pub async fn extract_handler(
@@ -348,8 +389,7 @@ pub async fn extract_handler(
                 ctx.insert("hash", &hash);
                 ctx.insert("remaining", &0u32);
                 ctx.insert("created_at", &"");
-                let rendered = tmpl.render("extract.html", &ctx).unwrap();
-                HttpResponse::Ok().content_type("text/html").body(rendered)
+                render_template(&tmpl, "extract.html", &ctx)
             }
         };
     }
@@ -360,9 +400,17 @@ pub async fn extract_handler(
         "SELECT * FROM qr_codes WHERE uuid = ?",
     )
     .bind(&uuid)
-    .fetch_one(pool.get_ref())
+    .fetch_optional(pool.get_ref())
     .await
-    .unwrap();
+    .unwrap_or(None);
+
+    let record = match record {
+        Some(r) => r,
+        None => {
+            log::warn!("Extract post-update fetch failed: uuid={uuid}");
+            return render_error(&tmpl, base, "提取异常，请重试", actix_web::http::StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
 
     let remaining = record.max_count.saturating_sub(record.used_count);
 
@@ -371,8 +419,7 @@ pub async fn extract_handler(
     ctx.insert("text_content", &record.text_content);
     ctx.insert("remaining", &remaining);
 
-    let rendered = tmpl.render("extract_result.html", &ctx).unwrap();
-    HttpResponse::Ok().content_type("text/html").body(rendered)
+    render_template(&tmpl, "extract_result.html", &ctx)
 }
 
 // ---- 提取记录页面 (需认证) ----
@@ -388,7 +435,7 @@ pub async fn extract_logs_page(
     let uuid = path.into_inner();
     let base = &config.server.context_path;
     let username = session.get::<String>("user").unwrap_or(None).unwrap_or_default();
-    let page = query.page.unwrap_or(1).max(1);
+    let page = query.page.unwrap_or(1).clamp(1, 100_000);
     let list_page = query.list_page.unwrap_or(1);
     let list_keyword = query.list_keyword.clone().unwrap_or_default();
     let offset = (page - 1) * PAGE_SIZE;
@@ -425,7 +472,7 @@ pub async fn extract_logs_page(
     .await
     .unwrap_or_default();
 
-    let total_pages = ((total as f64) / (PAGE_SIZE as f64)).ceil() as i64;
+    let total_pages = (total + PAGE_SIZE - 1) / PAGE_SIZE;
 
     let mut ctx = Context::new();
     ctx.insert("base", base);
@@ -437,6 +484,5 @@ pub async fn extract_logs_page(
     ctx.insert("list_page", &list_page);
     ctx.insert("list_keyword", &list_keyword);
 
-    let rendered = tmpl.render("logs.html", &ctx).unwrap();
-    HttpResponse::Ok().content_type("text/html").body(rendered)
+    render_template(&tmpl, "logs.html", &ctx)
 }

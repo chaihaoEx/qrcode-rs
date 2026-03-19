@@ -91,14 +91,14 @@
         </div>
 
         {% if total_pages > 1 %}
-        <div class="pagination" id="pagination" data-page="{{ page }}" data-total="{{ total_pages }}"></div>
+        <div class="pagination" id="pagination" data-page="{{ page }}" data-total="{{ total_pages }}" data-base="{{ base }}" data-keyword="{{ keyword }}"></div>
         <script>
         (function() {
             var el = document.getElementById('pagination');
             var cur = parseInt(el.dataset.page);
             var total = parseInt(el.dataset.total);
-            var base = '{{ base | safe }}';
-            var kw = '{{ keyword | safe }}';
+            var base = el.dataset.base;
+            var kw = el.dataset.keyword;
             function href(p) {
                 var s = base + '/?page=' + p;
                 if (kw) s += '&keyword=' + encodeURIComponent(kw);

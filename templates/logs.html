@@ -64,16 +64,16 @@
         </div>
 
         {% if total_pages > 1 %}
-        <div class="pagination" id="pagination" data-page="{{ page }}" data-total="{{ total_pages }}"></div>
+        <div class="pagination" id="pagination" data-page="{{ page }}" data-total="{{ total_pages }}" data-base="{{ base }}" data-uuid="{{ record.uuid }}" data-list-page="{{ list_page }}" data-list-keyword="{{ list_keyword }}"></div>
         <script>
         (function() {
             var el = document.getElementById('pagination');
             var cur = parseInt(el.dataset.page);
             var total = parseInt(el.dataset.total);
-            var base = '{{ base | safe }}';
-            var uuid = '{{ record.uuid | safe }}';
-            var lp = '{{ list_page }}';
-            var lk = '{{ list_keyword | safe }}';
+            var base = el.dataset.base;
+            var uuid = el.dataset.uuid;
+            var lp = el.dataset.listPage;
+            var lk = el.dataset.listKeyword;
             function href(p) {
                 var s = base + '/logs/' + uuid + '?page=' + p + '&list_page=' + lp;
                 if (lk) s += '&list_keyword=' + encodeURIComponent(lk);
