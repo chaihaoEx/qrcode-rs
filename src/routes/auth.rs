@@ -57,25 +57,6 @@ pub async fn login_handler(
     }
 }
 
-pub async fn welcome_page(
-    tmpl: web::Data<Tera>,
-    session: Session,
-    config: web::Data<Config>,
-) -> HttpResponse {
-    let base = &config.server.context_path;
-    let username = session
-        .get::<String>("user")
-        .unwrap_or(None)
-        .unwrap_or_default();
-
-    let mut ctx = Context::new();
-    ctx.insert("base", base);
-    ctx.insert("username", &username);
-
-    let rendered = tmpl.render("welcome.html", &ctx).unwrap();
-    HttpResponse::Ok().content_type("text/html").body(rendered)
-}
-
 pub async fn logout(session: Session, config: web::Data<Config>) -> HttpResponse {
     let base = &config.server.context_path;
     session.purge();

@@ -54,9 +54,10 @@ where
 
         let login_path = format!("{}/login", self.context_path);
         let static_path = format!("{}/static", self.context_path);
+        let extract_path = format!("{}/extract/", self.context_path);
 
-        // 放行登录页和静态资源
-        if path == login_path || path.starts_with(&static_path) {
+        // 放行登录页、静态资源和公开提取页
+        if path == login_path || path.starts_with(&static_path) || path.starts_with(&extract_path) {
             let fut = self.service.call(req);
             return Box::pin(async move { fut.await });
         }
