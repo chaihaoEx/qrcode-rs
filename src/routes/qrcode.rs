@@ -158,10 +158,16 @@ pub async fn list_page(
 
     let total_pages = (total + PAGE_SIZE - 1) / PAGE_SIZE;
 
+    let extract_hashes: std::collections::HashMap<String, String> = records
+        .iter()
+        .map(|r| (r.uuid.clone(), generate_extract_hash(&r.uuid, &config.server.extract_salt)))
+        .collect();
+
     let mut ctx = Context::new();
     ctx.insert("base", base);
     ctx.insert("username", &username);
     ctx.insert("records", &records);
+    ctx.insert("extract_hashes", &extract_hashes);
     ctx.insert("page", &page);
     ctx.insert("total_pages", &total_pages);
     ctx.insert("keyword", &keyword);

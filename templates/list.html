@@ -47,8 +47,7 @@
                         <th>创建时间</th>
                         <th>文字内容</th>
                         <th>备注</th>
-                        <th class="col-num">最大次数</th>
-                        <th class="col-num">已用次数</th>
+                        <th class="col-num">提取次数</th>
                         <th>最后提取IP</th>
                         <th>最后提取时间</th>
                         <th class="col-action">操作</th>
@@ -60,28 +59,30 @@
                         <td class="cell-time">{{ record.created_at }}</td>
                         <td><span class="text-truncate" title="{{ record.text_content }}">{{ record.text_content | truncate(length=40) }}</span></td>
                         <td class="cell-muted">{{ record.remark | default(value="-") }}</td>
-                        <td class="col-num">{{ record.max_count }}</td>
                         <td class="col-num">
                             <span class="badge {% if record.used_count >= record.max_count %}badge-exhausted{% elif record.used_count > 0 %}badge-active{% else %}badge-idle{% endif %}">
                                 {{ record.used_count }}
-                            </span>
+                            </span> / {{ record.max_count }}
                         </td>
                         <td class="cell-mono">{{ record.last_extract_ip | default(value="-") }}</td>
                         <td class="cell-time">{% if record.last_extract_at %}{{ record.last_extract_at }}{% else %}-{% endif %}</td>
                         <td class="col-action">
-                            <a href="{{ base }}/qrcode-image/{{ record.uuid }}" class="btn btn-outline btn-sm" title="下载二维码">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                                下载
-                            </a>
-                            <a href="{{ base }}/logs/{{ record.uuid }}?list_page={{ page }}{% if keyword %}&list_keyword={{ keyword }}{% endif %}" class="btn btn-outline btn-sm" title="提取记录">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-                                记录
-                            </a>
+                            <div class="action-group">
+                                <a href="{{ base }}/extract/{{ record.uuid }}/{{ extract_hashes[record.uuid] }}" target="_blank" class="action-btn" title="领取页面">
+                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                                </a>
+                                <a href="{{ base }}/qrcode-image/{{ record.uuid }}" class="action-btn" title="下载二维码">
+                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                </a>
+                                <a href="{{ base }}/logs/{{ record.uuid }}?list_page={{ page }}{% if keyword %}&list_keyword={{ keyword }}{% endif %}" class="action-btn" title="提取记录">
+                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                                </a>
+                            </div>
                         </td>
                     </tr>
                     {% endfor %}
                     {% if records | length == 0 %}
-                    <tr><td colspan="8" class="cell-empty">
+                    <tr><td colspan="7" class="cell-empty">
                         <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.3"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="3" height="3"/></svg>
                         <span>暂无数据</span>
                     </td></tr>
