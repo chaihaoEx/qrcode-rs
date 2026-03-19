@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}编辑二维码 - QRCode-RS{% endblock %}
+{% block body_class %}body-admin{% endblock %}
+{% block layout_class %}page-admin{% endblock %}
+
+{% block content %}
+<nav class="topbar">
+    <div class="topbar-inner">
+        <div class="topbar-brand">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="3" height="3"/><line x1="21" y1="14" x2="21" y2="17"/><line x1="14" y1="21" x2="17" y2="21"/>
+            </svg>
+            <span>QRCode-RS</span>
+        </div>
+        <div class="topbar-actions">
+            <a href="{{ base }}/" class="btn btn-ghost btn-sm">&larr; 返回列表</a>
+        </div>
+    </div>
+</nav>
+
+<main class="admin-main fade-in">
+    <div class="admin-header">
+        <h1>编辑二维码</h1>
+    </div>
+
+    <div class="admin-card">
+        <form method="POST" action="{{ base }}/edit/{{ record.uuid }}" class="form-create">
+            <div class="field">
+                <label for="text_content">文字内容 <span class="required">*</span></label>
+                <textarea id="text_content" name="text_content" rows="5" required>{{ record.text_content }}</textarea>
+            </div>
+            <div class="field">
+                <label for="remark">备注</label>
+                <input type="text" id="remark" name="remark" value="{{ record.remark | default(value='') }}" placeholder="选填，方便后续查找">
+            </div>
+            <div class="field">
+                <label for="max_count">最大提取次数</label>
+                <input type="number" id="max_count" name="max_count" value="{{ record.max_count }}" min="1">
+                <p class="field-hint">当前已使用 {{ record.used_count }} 次</p>
+            </div>
+            <div class="form-actions">
+                <a href="{{ base }}/" class="btn btn-ghost">取消</a>
+                <button type="submit" class="btn btn-primary">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                    保存
+                </button>
+            </div>
+        </form>
+    </div>
+</main>
+{% endblock %}
