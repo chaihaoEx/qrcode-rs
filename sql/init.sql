@@ -24,7 +24,18 @@ CREATE TABLE IF NOT EXISTS qr_extract_logs (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     qrcode_id BIGINT UNSIGNED NOT NULL,
     client_ip VARCHAR(45) NOT NULL,
+    segment_index INT UNSIGNED NULL,
     extracted_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_qrcode_id (qrcode_id),
+    FOREIGN KEY (qrcode_id) REFERENCES qr_codes(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 按IP独立计数表
+CREATE TABLE IF NOT EXISTS qr_ip_extracts (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    qrcode_id BIGINT UNSIGNED NOT NULL,
+    client_ip VARCHAR(45) NOT NULL,
+    used_count INT UNSIGNED NOT NULL DEFAULT 0,
+    UNIQUE KEY uk_qrcode_ip (qrcode_id, client_ip),
     FOREIGN KEY (qrcode_id) REFERENCES qr_codes(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
