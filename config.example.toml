@@ -9,6 +9,10 @@ context_path = ""
 public_host = "http://127.0.0.1:8080"
 # 二维码提取链接的 HMAC 校验盐值
 extract_salt = "CHANGE_ME_use_a_unique_random_salt_value"
+# HTTPS 配置（可选，不配置则仅使用 HTTP）
+# https_port = 8443
+# tls_cert = "/path/to/cert.pem"
+# tls_key = "/path/to/key.pem"
 
 [admin]
 username = "admin"

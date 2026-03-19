@@ -17,6 +17,12 @@ pub struct ServerConfig {
     pub context_path: String,
     pub public_host: String,
     pub extract_salt: String,
+    #[serde(default)]
+    pub https_port: Option<u16>,
+    #[serde(default)]
+    pub tls_cert: Option<String>,
+    #[serde(default)]
+    pub tls_key: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
