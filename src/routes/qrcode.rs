@@ -1,7 +1,35 @@
 use actix_session::Session;
 use actix_web::{web, HttpRequest, HttpResponse};
 use chrono::NaiveDateTime;
+
+mod datetime_format {
+    use chrono::NaiveDateTime;
+    use serde::{self, Serializer};
+
+    const FORMAT: &str = "%Y-%m-%d %H:%M:%S";
+
+    pub fn serialize<S>(date: &NaiveDateTime, serializer: S) -> Result<S::Ok, S::Error>
+    where S: Serializer {
+        serializer.serialize_str(&date.format(FORMAT).to_string())
+    }
+}
+
+mod option_datetime_format {
+    use chrono::NaiveDateTime;
+    use serde::{self, Serializer};
+
+    const FORMAT: &str = "%Y-%m-%d %H:%M:%S";
+
+    pub fn serialize<S>(date: &Option<NaiveDateTime>, serializer: S) -> Result<S::Ok, S::Error>
+    where S: Serializer {
+        match date {
+            Some(d) => serializer.serialize_str(&d.format(FORMAT).to_string()),
+            None => serializer.serialize_none(),
+        }
+    }
+}
 use image::ImageEncoder;
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use sqlx::MySqlPool;
 use tera::{Context, Tera};
@@ -56,6 +84,28 @@ fn render_error(tmpl: &Tera, base: &str, message: &str, status: actix_web::http:
     render_template_with_status(tmpl, "error.html", &ctx, status)
 }
 
+/// 解析 text_content 为多段文字。如果不是 JSON 数组，回退为单段。
+fn parse_segments(text_content: &str) -> Vec<String> {
+    match serde_json::from_str::<Vec<String>>(text_content) {
+        Ok(segments) if !segments.is_empty() => segments,
+        _ => vec![text_content.to_string()],
+    }
+}
+
+/// 截断显示：取第一段前12个字符 + "..."
+fn truncate_display(text_content: &str) -> String {
+    let segments = parse_segments(text_content);
+    let first = segments.first().map(|s| s.as_str()).unwrap_or("");
+    // 将换行替换为空格，方便在列表中显示
+    let first = first.replace('\n', " ").replace('\r', "");
+    let chars: Vec<char> = first.chars().collect();
+    if chars.len() > 12 {
+        format!("{}...", chars[..12].iter().collect::<String>())
+    } else {
+        first.to_string()
+    }
+}
+
 #[derive(sqlx::FromRow, Serialize)]
 pub struct QrCodeRecord {
     pub id: u64,
@@ -65,8 +115,10 @@ pub struct QrCodeRecord {
     pub max_count: u32,
     pub used_count: u32,
     pub last_extract_ip: Option<String>,
+    #[serde(serialize_with = "datetime_format::serialize")]
     pub created_at: NaiveDateTime,
     #[sqlx(default)]
+    #[serde(serialize_with = "option_datetime_format::serialize")]
     pub last_extract_at: Option<NaiveDateTime>,
 }
 
@@ -75,6 +127,8 @@ pub struct ExtractLog {
     pub id: u64,
     pub qrcode_id: u64,
     pub client_ip: String,
+    pub segment_index: Option<u32>,
+    #[serde(serialize_with = "datetime_format::serialize")]
     pub extracted_at: NaiveDateTime,
 }
 
@@ -163,11 +217,18 @@ pub async fn list_page(
         .map(|r| (r.uuid.clone(), generate_extract_hash(&r.uuid, &config.server.extract_salt)))
         .collect();
 
+    // 计算截断显示文字
+    let display_texts: std::collections::HashMap<String, String> = records
+        .iter()
+        .map(|r| (r.uuid.clone(), truncate_display(&r.text_content)))
+        .collect();
+
     let mut ctx = Context::new();
     ctx.insert("base", base);
     ctx.insert("username", &username);
     ctx.insert("records", &records);
     ctx.insert("extract_hashes", &extract_hashes);
+    ctx.insert("display_texts", &display_texts);
     ctx.insert("page", &page);
     ctx.insert("total_pages", &total_pages);
     ctx.insert("keyword", &keyword);
@@ -198,15 +259,42 @@ pub async fn create_handler(
 ) -> HttpResponse {
     let base = &config.server.context_path;
 
+    // text_content 应该是 JSON 数组格式
     let text_content = form.text_content.trim();
-    if text_content.is_empty() || text_content.len() > 5000 {
+    let segments: Vec<String> = match serde_json::from_str::<Vec<String>>(text_content) {
+        Ok(segs) => segs.into_iter().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(),
+        Err(_) => {
+            // 回退：当作单段文字
+            let trimmed = text_content.to_string();
+            if trimmed.is_empty() {
+                vec![]
+            } else {
+                vec![trimmed]
+            }
+        }
+    };
+
+    if segments.is_empty() {
         return render_error(
             &tmpl,
             base,
-            "文字内容不能为空且长度不能超过 5000 字符",
+            "文字内容不能为空",
             actix_web::http::StatusCode::BAD_REQUEST,
         );
     }
+
+    let total_len: usize = segments.iter().map(|s| s.len()).sum();
+    if total_len > 5000 {
+        return render_error(
+            &tmpl,
+            base,
+            "文字内容总长度不能超过 5000 字符",
+            actix_web::http::StatusCode::BAD_REQUEST,
+        );
+    }
+
+    // 存储为 JSON 数组
+    let text_content_json = serde_json::to_string(&segments).unwrap_or_default();
 
     let uuid = uuid::Uuid::new_v4().to_string();
     let max_count = form.max_count.unwrap_or(5).clamp(1, 10000);
@@ -216,7 +304,7 @@ pub async fn create_handler(
         "INSERT INTO qr_codes (uuid, text_content, remark, max_count, used_count, created_at) VALUES (?, ?, ?, ?, 0, NOW())",
     )
     .bind(&uuid)
-    .bind(text_content)
+    .bind(&text_content_json)
     .bind(remark)
     .bind(max_count)
     .execute(pool.get_ref())
@@ -231,7 +319,7 @@ pub async fn create_handler(
         );
     }
 
-    log::info!("QR code created: uuid={uuid}, max_count={max_count}");
+    log::info!("QR code created: uuid={uuid}, max_count={max_count}, segments={}", segments.len());
 
     HttpResponse::Found()
         .insert_header(("Location", format!("{base}/")))
@@ -283,6 +371,7 @@ pub async fn download_image(
 // ---- 公开页面 (无需认证) ----
 
 /// 扫码直接提取（GET 请求直接执行提取，无需确认步骤）
+/// 按IP独立计数，随机显示一段文字
 pub async fn extract_page(
     path: web::Path<(String, String)>,
     tmpl: web::Data<Tera>,
@@ -304,63 +393,7 @@ pub async fn extract_page(
         .unwrap_or("unknown")
         .to_string();
 
-    // 原子更新，防止并发超额提取
-    let result = sqlx::query(
-        "UPDATE qr_codes SET used_count = used_count + 1, last_extract_ip = ?, last_extract_at = NOW() WHERE uuid = ? AND used_count < max_count",
-    )
-    .bind(&client_ip)
-    .bind(&uuid)
-    .execute(pool.get_ref())
-    .await;
-
-    let rows_affected = match &result {
-        Ok(r) => r.rows_affected(),
-        Err(e) => {
-            log::warn!("Extract UPDATE failed: uuid={uuid}, error={e}");
-            0
-        }
-    };
-
-    if rows_affected > 0 {
-        // 记录提取日志
-        if let Err(e) = sqlx::query(
-            "INSERT INTO qr_extract_logs (qrcode_id, client_ip, extracted_at) SELECT id, ?, NOW() FROM qr_codes WHERE uuid = ?",
-        )
-        .bind(&client_ip)
-        .bind(&uuid)
-        .execute(pool.get_ref())
-        .await
-        {
-            log::warn!("Extract log INSERT failed: uuid={uuid}, error={e}");
-        }
-    }
-
-    if rows_affected == 0 {
-        // 可能是 uuid 不存在或次数已用完
-        let record = sqlx::query_as::<_, QrCodeRecord>(
-            "SELECT * FROM qr_codes WHERE uuid = ?",
-        )
-        .bind(&uuid)
-        .fetch_optional(pool.get_ref())
-        .await
-        .unwrap_or(None);
-
-        return match record {
-            None => {
-                log::warn!("Extract failed: uuid={uuid} not found, ip={client_ip}");
-                render_error(&tmpl, base, "二维码不存在", actix_web::http::StatusCode::NOT_FOUND)
-            }
-            Some(_) => {
-                log::warn!("Extract failed: uuid={uuid} exhausted, ip={client_ip}");
-                let mut ctx = Context::new();
-                ctx.insert("base", base);
-                render_template(&tmpl, "extract_exhausted.html", &ctx)
-            }
-        };
-    }
-
-    // 提取成功
-    log::info!("Extract success: uuid={uuid}, ip={client_ip}");
+    // 1. 查询二维码记录
     let record = sqlx::query_as::<_, QrCodeRecord>(
         "SELECT * FROM qr_codes WHERE uuid = ?",
     )
@@ -372,16 +405,87 @@ pub async fn extract_page(
     let record = match record {
         Some(r) => r,
         None => {
-            log::warn!("Extract post-update fetch failed: uuid={uuid}");
-            return render_error(&tmpl, base, "提取异常，请重试", actix_web::http::StatusCode::INTERNAL_SERVER_ERROR);
+            log::warn!("Extract failed: uuid={uuid} not found, ip={client_ip}");
+            return render_error(&tmpl, base, "二维码不存在", actix_web::http::StatusCode::NOT_FOUND);
         }
     };
 
-    let remaining = record.max_count.saturating_sub(record.used_count);
+    // 2. 按IP原子计数
+    // INSERT ... ON DUPLICATE KEY UPDATE: MySQL返回 1=新插入, 2=已更新, 0=未变(耗尽)
+    let result = sqlx::query(
+        "INSERT INTO qr_ip_extracts (qrcode_id, client_ip, used_count) VALUES (?, ?, 1) \
+         ON DUPLICATE KEY UPDATE used_count = IF(used_count < ?, used_count + 1, used_count)",
+    )
+    .bind(record.id)
+    .bind(&client_ip)
+    .bind(record.max_count)
+    .execute(pool.get_ref())
+    .await;
+
+    let rows_affected = match &result {
+        Ok(r) => r.rows_affected(),
+        Err(e) => {
+            log::warn!("Extract IP count failed: uuid={uuid}, ip={client_ip}, error={e}");
+            0
+        }
+    };
+
+    // rows_affected: 1=新插入成功, 2=更新成功, 0=未变化(耗尽)
+    if rows_affected == 0 {
+        log::warn!("Extract failed: uuid={uuid} exhausted for ip={client_ip}");
+        let mut ctx = Context::new();
+        ctx.insert("base", base);
+        return render_template(&tmpl, "extract_exhausted.html", &ctx);
+    }
+
+    // 3. 查询当前IP的已用次数
+    let ip_used: Option<u32> = sqlx::query_scalar(
+        "SELECT used_count FROM qr_ip_extracts WHERE qrcode_id = ? AND client_ip = ?",
+    )
+    .bind(record.id)
+    .bind(&client_ip)
+    .fetch_optional(pool.get_ref())
+    .await
+    .unwrap_or(None);
+
+    let ip_used = ip_used.unwrap_or(1);
+    let remaining = record.max_count.saturating_sub(ip_used);
+
+    // 4. 解析多段文字，随机选一段
+    let segments = parse_segments(&record.text_content);
+    let segment_index = rand::thread_rng().gen_range(0..segments.len());
+    let selected_text = &segments[segment_index];
+
+    // 5. 记录提取日志（含段落索引）
+    if let Err(e) = sqlx::query(
+        "INSERT INTO qr_extract_logs (qrcode_id, client_ip, segment_index, extracted_at) VALUES (?, ?, ?, NOW())",
+    )
+    .bind(record.id)
+    .bind(&client_ip)
+    .bind(segment_index as u32)
+    .execute(pool.get_ref())
+    .await
+    {
+        log::warn!("Extract log INSERT failed: uuid={uuid}, error={e}");
+    }
+
+    // 6. 更新总提取次数和最后提取信息（非关键）
+    if let Err(e) = sqlx::query(
+        "UPDATE qr_codes SET used_count = used_count + 1, last_extract_ip = ?, last_extract_at = NOW() WHERE uuid = ?",
+    )
+    .bind(&client_ip)
+    .bind(&uuid)
+    .execute(pool.get_ref())
+    .await
+    {
+        log::warn!("Update total count failed: uuid={uuid}, error={e}");
+    }
+
+    log::info!("Extract success: uuid={uuid}, ip={client_ip}, segment={segment_index}");
 
     let mut ctx = Context::new();
     ctx.insert("base", base);
-    ctx.insert("text_content", &record.text_content);
+    ctx.insert("text_content", selected_text);
     ctx.insert("remaining", &remaining);
 
     render_template(&tmpl, "extract_result.html", &ctx)
@@ -414,6 +518,7 @@ pub async fn delete_handler(
 }
 
 // ---- 重置提取次数 (需认证) ----
+// 只清除按IP计数，总提取次数不归零
 
 pub async fn reset_handler(
     path: web::Path<String>,
@@ -424,16 +529,18 @@ pub async fn reset_handler(
     let uuid = path.into_inner();
     let base = &config.server.context_path;
 
-    if let Err(e) = sqlx::query("UPDATE qr_codes SET used_count = 0 WHERE uuid = ?")
-        .bind(&uuid)
-        .execute(pool.get_ref())
-        .await
+    if let Err(e) = sqlx::query(
+        "DELETE FROM qr_ip_extracts WHERE qrcode_id = (SELECT id FROM qr_codes WHERE uuid = ?)",
+    )
+    .bind(&uuid)
+    .execute(pool.get_ref())
+    .await
     {
         log::warn!("Reset failed: uuid={uuid}, error={e}");
         return render_error(&tmpl, base, "重置失败，请稍后重试", actix_web::http::StatusCode::INTERNAL_SERVER_ERROR);
     }
 
-    log::info!("QR code reset: uuid={uuid}");
+    log::info!("QR code IP counts reset: uuid={uuid}");
     HttpResponse::Found()
         .insert_header(("Location", format!("{base}/")))
         .finish()
@@ -465,10 +572,13 @@ pub async fn edit_page(
         None => return render_error(&tmpl, base, "二维码不存在", actix_web::http::StatusCode::NOT_FOUND),
     };
 
+    let segments = parse_segments(&record.text_content);
+
     let mut ctx = Context::new();
     ctx.insert("base", base);
     ctx.insert("username", &username);
     ctx.insert("record", &record);
+    ctx.insert("segments", &segments);
 
     render_template(&tmpl, "edit.html", &ctx)
 }
@@ -483,23 +593,47 @@ pub async fn edit_handler(
     let uuid = path.into_inner();
     let base = &config.server.context_path;
 
+    // text_content 应该是 JSON 数组格式
     let text_content = form.text_content.trim();
-    if text_content.is_empty() || text_content.len() > 5000 {
+    let segments: Vec<String> = match serde_json::from_str::<Vec<String>>(text_content) {
+        Ok(segs) => segs.into_iter().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(),
+        Err(_) => {
+            let trimmed = text_content.to_string();
+            if trimmed.is_empty() {
+                vec![]
+            } else {
+                vec![trimmed]
+            }
+        }
+    };
+
+    if segments.is_empty() {
         return render_error(
             &tmpl,
             base,
-            "文字内容不能为空且长度不能超过 5000 字符",
+            "文字内容不能为空",
             actix_web::http::StatusCode::BAD_REQUEST,
         );
     }
 
+    let total_len: usize = segments.iter().map(|s| s.len()).sum();
+    if total_len > 5000 {
+        return render_error(
+            &tmpl,
+            base,
+            "文字内容总长度不能超过 5000 字符",
+            actix_web::http::StatusCode::BAD_REQUEST,
+        );
+    }
+
+    let text_content_json = serde_json::to_string(&segments).unwrap_or_default();
     let max_count = form.max_count.unwrap_or(5).clamp(1, 10000);
     let remark = form.remark.as_deref().filter(|s| !s.trim().is_empty());
 
     if let Err(e) = sqlx::query(
         "UPDATE qr_codes SET text_content = ?, remark = ?, max_count = ? WHERE uuid = ?",
     )
-    .bind(text_content)
+    .bind(&text_content_json)
     .bind(remark)
     .bind(max_count)
     .bind(&uuid)
@@ -573,10 +707,13 @@ pub async fn extract_logs_page(
 
     let total_pages = (total + PAGE_SIZE - 1) / PAGE_SIZE;
 
+    let display_text = truncate_display(&record.text_content);
+
     let mut ctx = Context::new();
     ctx.insert("base", base);
     ctx.insert("username", &username);
     ctx.insert("record", &record);
+    ctx.insert("display_text", &display_text);
     ctx.insert("logs", &logs);
     ctx.insert("page", &page);
     ctx.insert("total_pages", &total_pages);
