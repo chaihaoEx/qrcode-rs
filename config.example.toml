@@ -2,18 +2,18 @@
 host = "127.0.0.1"
 port = 8080
 # 用于签名 session cookie 的密钥，至少 64 字符
-secret_key = "please-change-this-to-a-random-string-at-least-64-characters-long!!"
+secret_key = "CHANGE_ME_generate_a_random_string_at_least_64_characters_long_using_openssl_rand"
 # 虚拟目录前缀，为空则不加前缀，例如 "/qrcode"
 context_path = ""
 # 二维码扫描后访问的主机名
 public_host = "http://127.0.0.1:8080"
 # 二维码提取链接的 HMAC 校验盐值
-extract_salt = "qrcode-rs-extract-salt-change-me"
+extract_salt = "CHANGE_ME_use_a_unique_random_salt_value"
 
 [admin]
 username = "admin"
 # 使用 `cargo run -- hash-password your_password` 生成
-password_hash = "$2b$12$LJ3m4sFQm/J.wOyS6gsOaO1TVqGxnLRkRClnMi/EEZoEIixqLOBiu"
+password_hash = "CHANGE_ME_run_cargo_run_hash_password_to_generate"
 
 [database]
-url = "mysql://root:password@localhost:3306/qrcode_db"
+url = "mysql://CHANGE_USER:CHANGE_PASSWORD@localhost:3306/qrcode_db"

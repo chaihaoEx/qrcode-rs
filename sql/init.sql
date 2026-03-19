@@ -25,5 +25,6 @@ CREATE TABLE IF NOT EXISTS qr_extract_logs (
     qrcode_id BIGINT UNSIGNED NOT NULL,
     client_ip VARCHAR(45) NOT NULL,
     extracted_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_qrcode_id (qrcode_id)
+    INDEX idx_qrcode_id (qrcode_id),
+    FOREIGN KEY (qrcode_id) REFERENCES qr_codes(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
