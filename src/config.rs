@@ -32,6 +32,7 @@ pub struct DatabaseConfig {
 
 impl Config {
     pub fn load(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        log::debug!("Loading config from: {path}");
         let content = fs::read_to_string(path)?;
         let mut config: Config = toml::from_str(&content)?;
         // 去除尾部斜杠

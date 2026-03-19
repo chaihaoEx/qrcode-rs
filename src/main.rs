@@ -22,6 +22,7 @@ async fn main() -> std::io::Result<()> {
 
     // 加载配置
     let config = config::Config::load("config.toml").expect("Failed to load config.toml");
+    log::info!("Config loaded: context_path={}, public_host={}", config.server.context_path, config.server.public_host);
     let bind_addr = format!("{}:{}", config.server.host, config.server.port);
 
     // 初始化数据库连接池（可选，连接失败仅警告）
@@ -38,6 +39,7 @@ async fn main() -> std::io::Result<()> {
 
     // 初始化模板引擎
     let tera = templates::init_templates();
+    log::info!("Template engine initialized");
 
     // Session 密钥
     let secret_key = Key::from(config.server.secret_key.as_bytes());
@@ -52,6 +54,7 @@ async fn main() -> std::io::Result<()> {
     let mut server = HttpServer::new(move || {
         let mut app = App::new()
             .wrap(middleware::AuthGuard { context_path: context_path.clone() })
+            .wrap(actix_web::middleware::Logger::default())
             .wrap(SessionMiddleware::builder(CookieSessionStore::default(), secret_key.clone()).build())
             .app_data(config_data.clone())
             .app_data(tera_data.clone());
