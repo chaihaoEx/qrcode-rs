@@ -14,6 +14,7 @@ pub fn configure(context_path: String) -> impl FnOnce(&mut web::ServiceConfig) {
                 .route("/qrcode-image/{uuid}", web::get().to(qrcode::download_image))
                 .route("/extract/{uuid}/{hash}", web::get().to(qrcode::extract_page))
                 .route("/extract/{uuid}/{hash}", web::post().to(qrcode::extract_handler))
+                .route("/logs/{uuid}", web::get().to(qrcode::extract_logs_page))
                 .route("/login", web::get().to(auth::login_page))
                 .route("/login", web::post().to(auth::login_handler))
                 .route("/logout", web::get().to(auth::logout))

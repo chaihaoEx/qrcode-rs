@@ -43,12 +43,29 @@ pub struct QrCodeRecord {
     pub used_count: u32,
     pub last_extract_ip: Option<String>,
     pub created_at: NaiveDateTime,
+    #[sqlx(default)]
+    pub last_extract_at: Option<NaiveDateTime>,
+}
+
+#[derive(sqlx::FromRow, Serialize)]
+pub struct ExtractLog {
+    pub id: u64,
+    pub qrcode_id: u64,
+    pub client_ip: String,
+    pub extracted_at: NaiveDateTime,
 }
 
 #[derive(Deserialize)]
 pub struct ListQuery {
     pub page: Option<i64>,
     pub keyword: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct LogsQuery {
+    pub page: Option<i64>,
+    pub list_page: Option<i64>,
+    pub list_keyword: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -274,7 +291,7 @@ pub async fn extract_handler(
 
     // 原子更新，防止并发超额提取
     let result = sqlx::query(
-        "UPDATE qr_codes SET used_count = used_count + 1, last_extract_ip = ? WHERE uuid = ? AND used_count < max_count",
+        "UPDATE qr_codes SET used_count = used_count + 1, last_extract_ip = ?, last_extract_at = NOW() WHERE uuid = ? AND used_count < max_count",
     )
     .bind(&client_ip)
     .bind(&uuid)
@@ -282,6 +299,17 @@ pub async fn extract_handler(
     .await;
 
     let rows_affected = result.map(|r| r.rows_affected()).unwrap_or(0);
+
+    if rows_affected > 0 {
+        // 记录提取日志
+        let _ = sqlx::query(
+            "INSERT INTO qr_extract_logs (qrcode_id, client_ip, extracted_at) SELECT id, ?, NOW() FROM qr_codes WHERE uuid = ?",
+        )
+        .bind(&client_ip)
+        .bind(&uuid)
+        .execute(pool.get_ref())
+        .await;
+    }
 
     if rows_affected == 0 {
         // 可能是 uuid 不存在或次数已用完
@@ -325,5 +353,70 @@ pub async fn extract_handler(
     ctx.insert("remaining", &remaining);
 
     let rendered = tmpl.render("extract_result.html", &ctx).unwrap();
+    HttpResponse::Ok().content_type("text/html").body(rendered)
+}
+
+// ---- 提取记录页面 (需认证) ----
+
+pub async fn extract_logs_page(
+    path: web::Path<String>,
+    tmpl: web::Data<Tera>,
+    pool: web::Data<MySqlPool>,
+    session: Session,
+    config: web::Data<Config>,
+    query: web::Query<LogsQuery>,
+) -> HttpResponse {
+    let uuid = path.into_inner();
+    let base = &config.server.context_path;
+    let username = session.get::<String>("user").unwrap_or(None).unwrap_or_default();
+    let page = query.page.unwrap_or(1).max(1);
+    let list_page = query.list_page.unwrap_or(1);
+    let list_keyword = query.list_keyword.clone().unwrap_or_default();
+    let offset = (page - 1) * PAGE_SIZE;
+
+    let record = sqlx::query_as::<_, QrCodeRecord>(
+        "SELECT * FROM qr_codes WHERE uuid = ?",
+    )
+    .bind(&uuid)
+    .fetch_optional(pool.get_ref())
+    .await
+    .unwrap_or(None);
+
+    let record = match record {
+        Some(r) => r,
+        None => return render_error(&tmpl, base, "二维码不存在", actix_web::http::StatusCode::NOT_FOUND),
+    };
+
+    let total: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM qr_extract_logs WHERE qrcode_id = ?",
+    )
+    .bind(record.id)
+    .fetch_one(pool.get_ref())
+    .await
+    .unwrap_or(0);
+
+    let logs = sqlx::query_as::<_, ExtractLog>(
+        "SELECT * FROM qr_extract_logs WHERE qrcode_id = ? ORDER BY extracted_at DESC LIMIT ? OFFSET ?",
+    )
+    .bind(record.id)
+    .bind(PAGE_SIZE)
+    .bind(offset)
+    .fetch_all(pool.get_ref())
+    .await
+    .unwrap_or_default();
+
+    let total_pages = ((total as f64) / (PAGE_SIZE as f64)).ceil() as i64;
+
+    let mut ctx = Context::new();
+    ctx.insert("base", base);
+    ctx.insert("username", &username);
+    ctx.insert("record", &record);
+    ctx.insert("logs", &logs);
+    ctx.insert("page", &page);
+    ctx.insert("total_pages", &total_pages);
+    ctx.insert("list_page", &list_page);
+    ctx.insert("list_keyword", &list_keyword);
+
+    let rendered = tmpl.render("logs.html", &ctx).unwrap();
     HttpResponse::Ok().content_type("text/html").body(rendered)
 }
