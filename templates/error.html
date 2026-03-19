@@ -1,11 +1,17 @@
 {% extends "base.html" %}
 
 {% block title %}提示 - QRCode-RS{% endblock %}
+{% block body_class %}body-extract{% endblock %}
 
 {% block content %}
-<div class="extract-box">
-    <div class="extract-exhausted">
-        <p>{{ message }}</p>
+<div class="extract-card fade-in">
+    <div class="extract-header">
+        <div class="extract-icon error">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+        </div>
+        <h1>{{ message }}</h1>
     </div>
 </div>
 {% endblock %}

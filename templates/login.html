@@ -1,24 +1,38 @@
 {% extends "base.html" %}
 
 {% block title %}登录 - QRCode-RS{% endblock %}
+{% block body_class %}body-login{% endblock %}
 
 {% block content %}
-<div class="login-box">
-    <h1>QRCode-RS</h1>
-    <h2>管理员登录</h2>
+<div class="login-card fade-in">
+    <div class="login-brand">
+        <div class="brand-icon">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="3" height="3"/><line x1="21" y1="14" x2="21" y2="17"/><line x1="14" y1="21" x2="17" y2="21"/>
+            </svg>
+        </div>
+        <h1>QRCode-RS</h1>
+        <p class="login-subtitle">管理员登录</p>
+    </div>
     {% if error %}
-    <div class="error">{{ error }}</div>
+    <div class="alert alert-error">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+        {{ error }}
+    </div>
     {% endif %}
-    <form method="POST" action="{{ base }}/login">
-        <div class="form-group">
+    <form method="POST" action="{{ base }}/login" class="login-form">
+        <div class="field">
             <label for="username">用户名</label>
-            <input type="text" id="username" name="username" required autofocus>
+            <input type="text" id="username" name="username" required autofocus placeholder="请输入用户名">
         </div>
-        <div class="form-group">
+        <div class="field">
             <label for="password">密码</label>
-            <input type="password" id="password" name="password" required>
+            <input type="password" id="password" name="password" required placeholder="请输入密码">
         </div>
-        <button type="submit">登录</button>
+        <button type="submit" class="btn btn-primary btn-block">
+            登录
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+        </button>
     </form>
 </div>
 {% endblock %}

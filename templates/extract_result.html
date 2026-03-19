@@ -1,15 +1,30 @@
 {% extends "base.html" %}
 
 {% block title %}提取成功 - QRCode-RS{% endblock %}
+{% block body_class %}body-extract{% endblock %}
 
 {% block content %}
-<div class="extract-box">
-    <h1>提取成功</h1>
-    <div class="extract-content">
-        <p class="content-text">{{ text_content }}</p>
+<div class="extract-card fade-in">
+    <div class="extract-header extract-header-success">
+        <div class="extract-icon success">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>
+            </svg>
+        </div>
+        <h1>提取成功</h1>
     </div>
-    <div class="extract-info">
-        <p>剩余提取次数：{{ remaining }}</p>
+
+    <div class="result-content">
+        <p class="result-text">{{ text_content }}</p>
+    </div>
+
+    <div class="extract-meta">
+        <div class="meta-row">
+            <span class="meta-label">剩余提取次数</span>
+            <span class="meta-value">
+                <span class="remaining-badge {% if remaining == 0 %}remaining-zero{% endif %}">{{ remaining }}</span>
+            </span>
+        </div>
     </div>
 </div>
 {% endblock %}

@@ -1,72 +1,100 @@
 {% extends "base.html" %}
 
 {% block title %}二维码管理 - QRCode-RS{% endblock %}
-
-{% block container_class %}container-wide{% endblock %}
+{% block body_class %}body-admin{% endblock %}
+{% block layout_class %}page-admin{% endblock %}
 
 {% block content %}
-<div class="admin-box">
-    <div class="header">
-        <h1>二维码管理</h1>
-        <div class="header-actions">
-            <span class="user-info">{{ username }}</span>
-            <a href="{{ base }}/logout" class="btn btn-sm">退出</a>
+<nav class="topbar">
+    <div class="topbar-inner">
+        <div class="topbar-brand">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="3" height="3"/><line x1="21" y1="14" x2="21" y2="17"/><line x1="14" y1="21" x2="17" y2="21"/>
+            </svg>
+            <span>QRCode-RS</span>
+        </div>
+        <div class="topbar-actions">
+            <span class="topbar-user">{{ username }}</span>
+            <a href="{{ base }}/logout" class="btn btn-ghost btn-sm">退出</a>
         </div>
     </div>
+</nav>
 
-    <div class="toolbar">
-        <a href="{{ base }}/create" class="btn btn-primary">创建二维码</a>
-        <form method="GET" action="{{ base }}/" class="search-form">
-            <input type="text" name="keyword" value="{{ keyword }}" placeholder="搜索文字内容或备注...">
-            <button type="submit" class="btn">搜索</button>
-            {% if keyword %}
-            <a href="{{ base }}/" class="btn btn-sm">清除</a>
-            {% endif %}
-        </form>
+<main class="admin-main fade-in">
+    <div class="admin-header">
+        <h1>二维码管理</h1>
+        <a href="{{ base }}/create" class="btn btn-primary">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            创建二维码
+        </a>
     </div>
 
-    <div class="table-wrap">
-        <table class="qr-table">
-            <thead>
-                <tr>
-                    <th>创建时间</th>
-                    <th>文字内容</th>
-                    <th>备注</th>
-                    <th>最大次数</th>
-                    <th>已用次数</th>
-                    <th>最后提取IP</th>
-                    <th>操作</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for record in records %}
-                <tr>
-                    <td>{{ record.created_at }}</td>
-                    <td class="text-truncate" title="{{ record.text_content }}">{{ record.text_content | truncate(length=40) }}</td>
-                    <td>{{ record.remark | default(value="-") }}</td>
-                    <td>{{ record.max_count }}</td>
-                    <td>{{ record.used_count }}</td>
-                    <td>{{ record.last_extract_ip | default(value="-") }}</td>
-                    <td><a href="{{ base }}/qrcode-image/{{ record.uuid }}" class="btn btn-sm">下载</a></td>
-                </tr>
-                {% endfor %}
-                {% if records | length == 0 %}
-                <tr><td colspan="7" class="empty">暂无数据</td></tr>
+    <div class="admin-card">
+        <div class="card-toolbar">
+            <form method="GET" action="{{ base }}/" class="search-bar">
+                <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input type="text" name="keyword" value="{{ keyword }}" placeholder="搜索文字内容或备注...">
+                {% if keyword %}
+                <a href="{{ base }}/" class="search-clear">&times;</a>
                 {% endif %}
-            </tbody>
-        </table>
-    </div>
+            </form>
+        </div>
 
-    {% if total_pages > 1 %}
-    <div class="pagination">
-        {% if page > 1 %}
-        <a href="{{ base }}/?page={{ page - 1 }}{% if keyword %}&keyword={{ keyword }}{% endif %}" class="btn btn-sm">&laquo; 上一页</a>
-        {% endif %}
-        <span class="page-info">第 {{ page }} / {{ total_pages }} 页</span>
-        {% if page < total_pages %}
-        <a href="{{ base }}/?page={{ page + 1 }}{% if keyword %}&keyword={{ keyword }}{% endif %}" class="btn btn-sm">下一页 &raquo;</a>
+        <div class="table-wrap">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>创建时间</th>
+                        <th>文字内容</th>
+                        <th>备注</th>
+                        <th class="col-num">最大次数</th>
+                        <th class="col-num">已用次数</th>
+                        <th>最后提取IP</th>
+                        <th class="col-action">操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for record in records %}
+                    <tr>
+                        <td class="cell-time">{{ record.created_at }}</td>
+                        <td><span class="text-truncate" title="{{ record.text_content }}">{{ record.text_content | truncate(length=40) }}</span></td>
+                        <td class="cell-muted">{{ record.remark | default(value="-") }}</td>
+                        <td class="col-num">{{ record.max_count }}</td>
+                        <td class="col-num">
+                            <span class="badge {% if record.used_count >= record.max_count %}badge-exhausted{% elif record.used_count > 0 %}badge-active{% else %}badge-idle{% endif %}">
+                                {{ record.used_count }}
+                            </span>
+                        </td>
+                        <td class="cell-mono">{{ record.last_extract_ip | default(value="-") }}</td>
+                        <td class="col-action">
+                            <a href="{{ base }}/qrcode-image/{{ record.uuid }}" class="btn btn-outline btn-sm" title="下载二维码">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                下载
+                            </a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% if records | length == 0 %}
+                    <tr><td colspan="7" class="cell-empty">
+                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.3"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="3" height="3"/></svg>
+                        <span>暂无数据</span>
+                    </td></tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+
+        {% if total_pages > 1 %}
+        <div class="pagination">
+            {% if page > 1 %}
+            <a href="{{ base }}/?page={{ page - 1 }}{% if keyword %}&keyword={{ keyword }}{% endif %}" class="btn btn-ghost btn-sm">&larr; 上一页</a>
+            {% endif %}
+            <span class="page-info">{{ page }} / {{ total_pages }}</span>
+            {% if page < total_pages %}
+            <a href="{{ base }}/?page={{ page + 1 }}{% if keyword %}&keyword={{ keyword }}{% endif %}" class="btn btn-ghost btn-sm">下一页 &rarr;</a>
+            {% endif %}
+        </div>
         {% endif %}
     </div>
-    {% endif %}
-</div>
+</main>
 {% endblock %}

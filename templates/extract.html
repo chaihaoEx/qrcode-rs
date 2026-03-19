@@ -1,21 +1,44 @@
 {% extends "base.html" %}
 
 {% block title %}信息提取 - QRCode-RS{% endblock %}
+{% block body_class %}body-extract{% endblock %}
 
 {% block content %}
-<div class="extract-box">
-    <h1>信息提取</h1>
+<div class="extract-card fade-in">
+    <div class="extract-header">
+        <div class="extract-icon">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="3" height="3"/>
+            </svg>
+        </div>
+        <h1>信息提取</h1>
+    </div>
 
     {% if remaining > 0 %}
-    <div class="extract-info">
-        <p><strong>创建时间：</strong>{{ created_at }}</p>
-        <p><strong>剩余提取次数：</strong>{{ remaining }}</p>
+    <div class="extract-meta">
+        <div class="meta-row">
+            <span class="meta-label">创建时间</span>
+            <span class="meta-value">{{ created_at }}</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">剩余次数</span>
+            <span class="meta-value">
+                <span class="remaining-badge">{{ remaining }}</span>
+            </span>
+        </div>
     </div>
     <form method="POST" action="{{ base }}/extract/{{ uuid }}/{{ hash }}">
-        <button type="submit" class="btn btn-primary btn-lg">确认提取</button>
+        <button type="submit" class="btn btn-primary btn-block btn-extract">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            确认提取
+        </button>
     </form>
+    <p class="extract-tip">点击后将消耗一次提取次数</p>
     {% else %}
-    <div class="extract-exhausted">
+    <div class="extract-empty">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.4">
+            <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
+        </svg>
         <p>该二维码已无剩余提取次数</p>
     </div>
     {% endif %}
