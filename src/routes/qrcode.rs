@@ -410,11 +410,22 @@ pub async fn extract_page(
         }
     };
 
-    // 2. 按IP原子计数
-    // INSERT ... ON DUPLICATE KEY UPDATE: MySQL返回 1=新插入, 2=已更新, 0=未变(耗尽)
+    // 2. 按IP原子计数（拆为两步，避免 CLIENT_FOUND_ROWS 导致 rows_affected 不可靠）
+    // 2a. 确保行存在
+    if let Err(e) = sqlx::query(
+        "INSERT IGNORE INTO qr_ip_extracts (qrcode_id, client_ip, used_count) VALUES (?, ?, 0)",
+    )
+    .bind(record.id)
+    .bind(&client_ip)
+    .execute(pool.get_ref())
+    .await
+    {
+        log::warn!("Extract IP insert failed: uuid={uuid}, ip={client_ip}, error={e}");
+    }
+
+    // 2b. 原子递增，WHERE 不匹配时 rows_affected 一定为 0
     let result = sqlx::query(
-        "INSERT INTO qr_ip_extracts (qrcode_id, client_ip, used_count) VALUES (?, ?, 1) \
-         ON DUPLICATE KEY UPDATE used_count = IF(used_count < ?, used_count + 1, used_count)",
+        "UPDATE qr_ip_extracts SET used_count = used_count + 1 WHERE qrcode_id = ? AND client_ip = ? AND used_count < ?",
     )
     .bind(record.id)
     .bind(&client_ip)
@@ -430,7 +441,6 @@ pub async fn extract_page(
         }
     };
 
-    // rows_affected: 1=新插入成功, 2=更新成功, 0=未变化(耗尽)
     if rows_affected == 0 {
         log::warn!("Extract failed: uuid={uuid} exhausted for ip={client_ip}");
         let mut ctx = Context::new();
