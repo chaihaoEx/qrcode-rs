@@ -1,0 +1,15 @@
+[server]
+host = "127.0.0.1"
+port = 8080
+# 用于签名 session cookie 的密钥，至少 64 字符
+secret_key = "please-change-this-to-a-random-string-at-least-64-characters-long!!"
+# 虚拟目录前缀，为空则不加前缀，例如 "/qrcode"
+context_path = ""
+
+[admin]
+username = "admin"
+# 使用 `cargo run -- hash-password your_password` 生成
+password_hash = "$2b$12$LJ3m4sFQm/J.wOyS6gsOaO1TVqGxnLRkRClnMi/EEZoEIixqLOBiu"
+
+[database]
+url = "mysql://root:password@localhost:3306/qrcode_db"

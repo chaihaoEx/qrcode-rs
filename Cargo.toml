@@ -4,3 +4,14 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+actix-web = "4"
+actix-session = { version = "0.10", features = ["cookie-session"] }
+actix-files = "0.6"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+tera = "1"
+sqlx = { version = "0.8", features = ["runtime-tokio", "mysql"] }
+tokio = { version = "1", features = ["full"] }
+bcrypt = "0.17"
+env_logger = "0.11"
+log = "0.4"
