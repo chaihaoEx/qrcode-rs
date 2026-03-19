@@ -3,8 +3,8 @@
    ========================================== */
 
 :root {
-    --font-body: "DM Sans", -apple-system, BlinkMacSystemFont, sans-serif;
-    --font-mono: "JetBrains Mono", ui-monospace, monospace;
+    --font-body: "LXGW WenKai Screen", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
 
     --gray-50: #f8fafc;
     --gray-100: #f1f5f9;
