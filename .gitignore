@@ -17,3 +17,6 @@ Thumbs.db
 
 # Config (contains credentials)
 config.toml
+
+# 运维文档（含服务器地址、密钥路径等敏感信息）
+DEVOPS.md
