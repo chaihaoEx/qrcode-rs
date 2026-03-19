@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+
+{% block title %}首页 - QRCode-RS{% endblock %}
+
+{% block content %}
+<div class="welcome-box">
+    <h1>欢迎，{{ username }}</h1>
+    <p>QRCode-RS 管理后台</p>
+    <a href="{{ base }}/logout" class="logout-link">退出登录</a>
+</div>
+{% endblock %}
