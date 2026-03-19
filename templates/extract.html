@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block title %}信息提取 - QRCode-RS{% endblock %}
+
+{% block content %}
+<div class="extract-box">
+    <h1>信息提取</h1>
+
+    {% if remaining > 0 %}
+    <div class="extract-info">
+        <p><strong>创建时间：</strong>{{ created_at }}</p>
+        <p><strong>剩余提取次数：</strong>{{ remaining }}</p>
+    </div>
+    <form method="POST" action="{{ base }}/extract/{{ uuid }}">
+        <button type="submit" class="btn btn-primary btn-lg">确认提取</button>
+    </form>
+    {% else %}
+    <div class="extract-exhausted">
+        <p>该二维码已无剩余提取次数</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

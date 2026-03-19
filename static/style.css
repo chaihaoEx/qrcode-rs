@@ -15,7 +15,8 @@ body {
     padding: 20px;
 }
 
-.login-box, .welcome-box {
+/* 登录页 */
+.login-box {
     background: #fff;
     border-radius: 8px;
     padding: 40px;
@@ -48,22 +49,53 @@ label {
     font-size: 14px;
 }
 
-input {
+.required { color: #ff4d4f; }
+
+input, textarea {
     width: 100%;
     padding: 10px 12px;
     border: 1px solid #d9d9d9;
     border-radius: 4px;
     font-size: 14px;
+    font-family: inherit;
     transition: border-color 0.2s;
 }
 
-input:focus {
+input:focus, textarea:focus {
     outline: none;
     border-color: #1890ff;
     box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.2);
 }
 
-button {
+/* 按钮 */
+.btn {
+    display: inline-block;
+    padding: 8px 16px;
+    background: #fff;
+    color: #333;
+    border: 1px solid #d9d9d9;
+    border-radius: 4px;
+    font-size: 14px;
+    cursor: pointer;
+    text-decoration: none;
+    transition: all 0.2s;
+}
+
+.btn:hover { border-color: #1890ff; color: #1890ff; }
+
+.btn-primary {
+    background: #1890ff;
+    color: #fff;
+    border-color: #1890ff;
+}
+
+.btn-primary:hover { background: #40a9ff; border-color: #40a9ff; color: #fff; }
+
+.btn-sm { padding: 4px 12px; font-size: 12px; }
+
+.btn-lg { padding: 14px 32px; font-size: 18px; width: 100%; }
+
+button[type="submit"] {
     width: 100%;
     padding: 10px;
     background: #1890ff;
@@ -73,17 +105,166 @@ button {
     font-size: 16px;
     cursor: pointer;
     margin-top: 8px;
-    transition: background 0.2s;
 }
 
-button:hover { background: #40a9ff; }
+button[type="submit"]:hover { background: #40a9ff; }
 
-.welcome-box p { color: #666; margin: 12px 0 24px; }
+/* 管理页面 */
+.admin-box {
+    background: #fff;
+    border-radius: 8px;
+    padding: 24px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    width: 100%;
+}
 
-.logout-link {
-    color: #1890ff;
-    text-decoration: none;
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.header-actions { display: flex; align-items: center; gap: 12px; }
+
+.user-info { color: #666; font-size: 14px; }
+
+.toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+}
+
+.search-form {
+    display: flex;
+    gap: 8px;
+    flex: 1;
+    min-width: 200px;
+}
+
+.search-form input {
+    flex: 1;
+    width: auto;
+}
+
+/* 表格 */
+.table-wrap { overflow-x: auto; }
+
+.qr-table {
+    width: 100%;
+    border-collapse: collapse;
     font-size: 14px;
 }
 
-.logout-link:hover { text-decoration: underline; }
+.qr-table th, .qr-table td {
+    padding: 12px 8px;
+    text-align: left;
+    border-bottom: 1px solid #f0f0f0;
+    white-space: nowrap;
+}
+
+.qr-table th {
+    background: #fafafa;
+    font-weight: 600;
+    color: #333;
+}
+
+.qr-table tbody tr:hover { background: #f5f5f5; }
+
+.text-truncate {
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.empty { text-align: center; color: #999; padding: 40px 0 !important; }
+
+/* 分页 */
+.pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid #f0f0f0;
+}
+
+.page-info { color: #666; font-size: 14px; }
+
+/* 创建表单 */
+.create-form { max-width: 500px; }
+
+/* 提取页面 */
+.extract-box {
+    background: #fff;
+    border-radius: 8px;
+    padding: 32px 24px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    text-align: center;
+    max-width: 420px;
+    width: 100%;
+}
+
+.extract-info {
+    margin: 20px 0;
+    text-align: left;
+    font-size: 15px;
+    line-height: 2;
+    color: #555;
+}
+
+.extract-content {
+    margin: 24px 0;
+    padding: 20px;
+    background: #f6ffed;
+    border: 1px solid #b7eb8f;
+    border-radius: 8px;
+}
+
+.content-text {
+    font-size: 18px;
+    color: #1a1a1a;
+    word-break: break-all;
+    white-space: pre-wrap;
+    line-height: 1.6;
+}
+
+.extract-exhausted {
+    margin: 24px 0;
+    padding: 20px;
+    background: #fff2f0;
+    border: 1px solid #ffccc7;
+    border-radius: 8px;
+    color: #ff4d4f;
+    font-size: 16px;
+}
+
+/* 管理页面加宽容器 */
+.container-wide {
+    max-width: 960px;
+}
+
+/* 移动端适配 */
+@media (max-width: 600px) {
+    .container { padding: 12px; }
+
+    .admin-box { padding: 16px; }
+
+    .header { flex-direction: column; gap: 8px; align-items: flex-start; }
+
+    .toolbar { flex-direction: column; align-items: stretch; }
+
+    .search-form { min-width: auto; }
+
+    .qr-table th, .qr-table td { padding: 8px 6px; font-size: 12px; }
+
+    .extract-box { padding: 24px 16px; }
+
+    .btn-lg { padding: 12px 24px; font-size: 16px; }
+}

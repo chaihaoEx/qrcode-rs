@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+
+{% block title %}提取成功 - QRCode-RS{% endblock %}
+
+{% block content %}
+<div class="extract-box">
+    <h1>提取成功</h1>
+    <div class="extract-content">
+        <p class="content-text">{{ text_content }}</p>
+    </div>
+    <div class="extract-info">
+        <p>剩余提取次数：{{ remaining }}</p>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+
+{% block title %}二维码管理 - QRCode-RS{% endblock %}
+
+{% block container_class %}container-wide{% endblock %}
+
+{% block content %}
+<div class="admin-box">
+    <div class="header">
+        <h1>二维码管理</h1>
+        <div class="header-actions">
+            <span class="user-info">{{ username }}</span>
+            <a href="{{ base }}/logout" class="btn btn-sm">退出</a>
+        </div>
+    </div>
+
+    <div class="toolbar">
+        <a href="{{ base }}/create" class="btn btn-primary">创建二维码</a>
+        <form method="GET" action="{{ base }}/" class="search-form">
+            <input type="text" name="keyword" value="{{ keyword }}" placeholder="搜索文字内容或备注...">
+            <button type="submit" class="btn">搜索</button>
+            {% if keyword %}
+            <a href="{{ base }}/" class="btn btn-sm">清除</a>
+            {% endif %}
+        </form>
+    </div>
+
+    <div class="table-wrap">
+        <table class="qr-table">
+            <thead>
+                <tr>
+                    <th>创建时间</th>
+                    <th>文字内容</th>
+                    <th>备注</th>
+                    <th>最大次数</th>
+                    <th>已用次数</th>
+                    <th>最后提取IP</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for record in records %}
+                <tr>
+                    <td>{{ record.created_at }}</td>
+                    <td class="text-truncate" title="{{ record.text_content }}">{{ record.text_content | truncate(length=40) }}</td>
+                    <td>{{ record.remark | default(value="-") }}</td>
+                    <td>{{ record.max_count }}</td>
+                    <td>{{ record.used_count }}</td>
+                    <td>{{ record.last_extract_ip | default(value="-") }}</td>
+                    <td><a href="{{ base }}/qrcode-image/{{ record.uuid }}" class="btn btn-sm">下载</a></td>
+                </tr>
+                {% endfor %}
+                {% if records | length == 0 %}
+                <tr><td colspan="7" class="empty">暂无数据</td></tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+
+    {% if total_pages > 1 %}
+    <div class="pagination">
+        {% if page > 1 %}
+        <a href="{{ base }}/?page={{ page - 1 }}{% if keyword %}&keyword={{ keyword }}{% endif %}" class="btn btn-sm">&laquo; 上一页</a>
+        {% endif %}
+        <span class="page-info">第 {{ page }} / {{ total_pages }} 页</span>
+        {% if page < total_pages %}
+        <a href="{{ base }}/?page={{ page + 1 }}{% if keyword %}&keyword={{ keyword }}{% endif %}" class="btn btn-sm">下一页 &raquo;</a>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
