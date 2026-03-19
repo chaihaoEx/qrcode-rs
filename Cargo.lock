@@ -2412,7 +2412,7 @@ dependencies = [
 
 [[package]]
 name = "qrcode-rs"
-version = "1.4.1"
+version = "1.5.0"
 dependencies = [
  "actix-files",
  "actix-session",
@@ -2424,7 +2424,6 @@ dependencies = [
  "image",
  "log",
  "qrcode",
- "rand 0.8.5",
  "rustls",
  "rustls-pemfile",
  "serde",
