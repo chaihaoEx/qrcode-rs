@@ -34,7 +34,7 @@
             <div style="display:flex;gap:2rem;flex-wrap:wrap;font-size:0.9rem;">
                 <span><strong>文字内容：</strong>{{ display_text }}</span>
                 <span><strong>备注：</strong>{{ record.remark | default(value="-") }}</span>
-                <span><strong>总提取：</strong>{{ record.used_count }} 次</span>
+                <span><strong>已分配：</strong>{{ record.used_count }} 个</span>
                 <span><strong>总槽位数：</strong>{{ record.max_count }} 个</span>
             </div>
         </div>
