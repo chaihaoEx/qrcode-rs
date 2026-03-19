@@ -31,5 +31,9 @@
             </span>
         </div>
     </div>
+
+    {% if remaining == 0 %}
+    <p class="extract-contact">提取次数已用完，如需刷新次数请联系管理员</p>
+    {% endif %}
 </div>
 {% endblock %}

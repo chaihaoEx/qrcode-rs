@@ -282,46 +282,8 @@ pub async fn download_image(
 
 // ---- 公开页面 (无需认证) ----
 
+/// 扫码直接提取（GET 请求直接执行提取，无需确认步骤）
 pub async fn extract_page(
-    path: web::Path<(String, String)>,
-    tmpl: web::Data<Tera>,
-    pool: web::Data<MySqlPool>,
-    config: web::Data<Config>,
-) -> HttpResponse {
-    let (uuid, hash) = path.into_inner();
-    let base = &config.server.context_path;
-    log::debug!("Extract page visited: uuid={uuid}");
-
-    if !verify_extract_hash(&uuid, &hash, &config.server.extract_salt) {
-        return render_error(&tmpl, base, "无效二维码", actix_web::http::StatusCode::BAD_REQUEST);
-    }
-
-    let record = sqlx::query_as::<_, QrCodeRecord>(
-        "SELECT * FROM qr_codes WHERE uuid = ?",
-    )
-    .bind(&uuid)
-    .fetch_optional(pool.get_ref())
-    .await
-    .unwrap_or(None);
-
-    let record = match record {
-        Some(r) => r,
-        None => return render_error(&tmpl, base, "二维码不存在", actix_web::http::StatusCode::NOT_FOUND),
-    };
-
-    let remaining = record.max_count.saturating_sub(record.used_count);
-
-    let mut ctx = Context::new();
-    ctx.insert("base", base);
-    ctx.insert("uuid", &uuid);
-    ctx.insert("hash", &hash);
-    ctx.insert("created_at", &record.created_at.format("%Y-%m-%d %H:%M:%S").to_string());
-    ctx.insert("remaining", &remaining);
-
-    render_template(&tmpl, "extract.html", &ctx)
-}
-
-pub async fn extract_handler(
     path: web::Path<(String, String)>,
     tmpl: web::Data<Tera>,
     pool: web::Data<MySqlPool>,
@@ -330,6 +292,7 @@ pub async fn extract_handler(
 ) -> HttpResponse {
     let (uuid, hash) = path.into_inner();
     let base = &config.server.context_path;
+    log::debug!("Extract page visited: uuid={uuid}");
 
     if !verify_extract_hash(&uuid, &hash, &config.server.extract_salt) {
         return render_error(&tmpl, base, "无效二维码", actix_web::http::StatusCode::BAD_REQUEST);
@@ -391,11 +354,7 @@ pub async fn extract_handler(
                 log::warn!("Extract failed: uuid={uuid} exhausted, ip={client_ip}");
                 let mut ctx = Context::new();
                 ctx.insert("base", base);
-                ctx.insert("uuid", &uuid);
-                ctx.insert("hash", &hash);
-                ctx.insert("remaining", &0u32);
-                ctx.insert("created_at", &"");
-                render_template(&tmpl, "extract.html", &ctx)
+                render_template(&tmpl, "extract_exhausted.html", &ctx)
             }
         };
     }
@@ -426,6 +385,140 @@ pub async fn extract_handler(
     ctx.insert("remaining", &remaining);
 
     render_template(&tmpl, "extract_result.html", &ctx)
+}
+
+// ---- 删除 (需认证) ----
+
+pub async fn delete_handler(
+    path: web::Path<String>,
+    tmpl: web::Data<Tera>,
+    pool: web::Data<MySqlPool>,
+    config: web::Data<Config>,
+) -> HttpResponse {
+    let uuid = path.into_inner();
+    let base = &config.server.context_path;
+
+    if let Err(e) = sqlx::query("DELETE FROM qr_codes WHERE uuid = ?")
+        .bind(&uuid)
+        .execute(pool.get_ref())
+        .await
+    {
+        log::warn!("Delete failed: uuid={uuid}, error={e}");
+        return render_error(&tmpl, base, "删除失败，请稍后重试", actix_web::http::StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    log::info!("QR code deleted: uuid={uuid}");
+    HttpResponse::Found()
+        .insert_header(("Location", format!("{base}/")))
+        .finish()
+}
+
+// ---- 重置提取次数 (需认证) ----
+
+pub async fn reset_handler(
+    path: web::Path<String>,
+    tmpl: web::Data<Tera>,
+    pool: web::Data<MySqlPool>,
+    config: web::Data<Config>,
+) -> HttpResponse {
+    let uuid = path.into_inner();
+    let base = &config.server.context_path;
+
+    if let Err(e) = sqlx::query("UPDATE qr_codes SET used_count = 0 WHERE uuid = ?")
+        .bind(&uuid)
+        .execute(pool.get_ref())
+        .await
+    {
+        log::warn!("Reset failed: uuid={uuid}, error={e}");
+        return render_error(&tmpl, base, "重置失败，请稍后重试", actix_web::http::StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    log::info!("QR code reset: uuid={uuid}");
+    HttpResponse::Found()
+        .insert_header(("Location", format!("{base}/")))
+        .finish()
+}
+
+// ---- 编辑 (需认证) ----
+
+pub async fn edit_page(
+    path: web::Path<String>,
+    tmpl: web::Data<Tera>,
+    pool: web::Data<MySqlPool>,
+    session: Session,
+    config: web::Data<Config>,
+) -> HttpResponse {
+    let uuid = path.into_inner();
+    let base = &config.server.context_path;
+    let username = session.get::<String>("user").unwrap_or(None).unwrap_or_default();
+
+    let record = sqlx::query_as::<_, QrCodeRecord>(
+        "SELECT * FROM qr_codes WHERE uuid = ?",
+    )
+    .bind(&uuid)
+    .fetch_optional(pool.get_ref())
+    .await
+    .unwrap_or(None);
+
+    let record = match record {
+        Some(r) => r,
+        None => return render_error(&tmpl, base, "二维码不存在", actix_web::http::StatusCode::NOT_FOUND),
+    };
+
+    let mut ctx = Context::new();
+    ctx.insert("base", base);
+    ctx.insert("username", &username);
+    ctx.insert("record", &record);
+
+    render_template(&tmpl, "edit.html", &ctx)
+}
+
+pub async fn edit_handler(
+    path: web::Path<String>,
+    form: web::Form<CreateForm>,
+    tmpl: web::Data<Tera>,
+    pool: web::Data<MySqlPool>,
+    config: web::Data<Config>,
+) -> HttpResponse {
+    let uuid = path.into_inner();
+    let base = &config.server.context_path;
+
+    let text_content = form.text_content.trim();
+    if text_content.is_empty() || text_content.len() > 5000 {
+        return render_error(
+            &tmpl,
+            base,
+            "文字内容不能为空且长度不能超过 5000 字符",
+            actix_web::http::StatusCode::BAD_REQUEST,
+        );
+    }
+
+    let max_count = form.max_count.unwrap_or(5).clamp(1, 10000);
+    let remark = form.remark.as_deref().filter(|s| !s.trim().is_empty());
+
+    if let Err(e) = sqlx::query(
+        "UPDATE qr_codes SET text_content = ?, remark = ?, max_count = ? WHERE uuid = ?",
+    )
+    .bind(text_content)
+    .bind(remark)
+    .bind(max_count)
+    .bind(&uuid)
+    .execute(pool.get_ref())
+    .await
+    {
+        log::warn!("QR code update failed: uuid={uuid}, error={e}");
+        return render_error(
+            &tmpl,
+            base,
+            "更新失败，请稍后重试",
+            actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
+        );
+    }
+
+    log::info!("QR code updated: uuid={uuid}");
+    HttpResponse::Found()
+        .insert_header(("Location", format!("{base}/")))
+        .finish()
 }
 
 // ---- 提取记录页面 (需认证) ----
