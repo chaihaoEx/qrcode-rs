@@ -5,6 +5,8 @@ port = 8080
 secret_key = "please-change-this-to-a-random-string-at-least-64-characters-long!!"
 # 虚拟目录前缀，为空则不加前缀，例如 "/qrcode"
 context_path = ""
+# 二维码扫描后访问的主机名
+public_host = "http://127.0.0.1:8080"
 
 [admin]
 username = "admin"
