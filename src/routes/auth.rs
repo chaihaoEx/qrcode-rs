@@ -5,6 +5,13 @@ use tera::{Context, Tera};
 
 use crate::config::Config;
 
+fn get_client_ip(req: &HttpRequest) -> String {
+    req.connection_info()
+        .realip_remote_addr()
+        .unwrap_or("unknown")
+        .to_string()
+}
+
 #[derive(Deserialize)]
 pub struct LoginForm {
     pub username: String,
@@ -40,17 +47,21 @@ pub async fn login_handler(
     form: web::Form<LoginForm>,
     session: Session,
     config: web::Data<Config>,
+    req: HttpRequest,
 ) -> HttpResponse {
     let base = &config.server.context_path;
+    let client_ip = get_client_ip(&req);
 
     if form.username == config.admin.username
         && bcrypt::verify(&form.password, &config.admin.password_hash).unwrap_or(false)
     {
         session.insert("user", &form.username).unwrap();
+        log::info!("Login success: user={}, ip={client_ip}", form.username);
         HttpResponse::Found()
             .insert_header(("Location", format!("{base}/")))
             .finish()
     } else {
+        log::warn!("Login failed: user={}, ip={client_ip}", form.username);
         HttpResponse::Found()
             .insert_header(("Location", format!("{base}/login?error=1")))
             .finish()
@@ -59,6 +70,8 @@ pub async fn login_handler(
 
 pub async fn logout(session: Session, config: web::Data<Config>) -> HttpResponse {
     let base = &config.server.context_path;
+    let username = session.get::<String>("user").unwrap_or(None).unwrap_or_default();
+    log::info!("Logout: user={username}");
     session.purge();
     HttpResponse::Found()
         .insert_header(("Location", format!("{base}/login")))

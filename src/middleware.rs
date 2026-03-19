@@ -58,21 +58,21 @@ where
 
         // 放行登录页、静态资源和公开提取页
         if path == login_path || path.starts_with(&static_path) || path.starts_with(&extract_path) {
+            log::debug!("AuthGuard: public path, pass through: {path}");
             let fut = self.service.call(req);
             return Box::pin(async move { fut.await });
         }
 
         // 检查 session
         let session = req.get_session();
-        let is_logged_in = session
-            .get::<String>("user")
-            .unwrap_or(None)
-            .is_some();
+        let username = session.get::<String>("user").unwrap_or(None);
 
-        if is_logged_in {
+        if let Some(ref user) = username {
+            log::debug!("AuthGuard: authenticated user={user}, path={path}");
             let fut = self.service.call(req);
             Box::pin(async move { fut.await })
         } else {
+            log::info!("AuthGuard: unauthenticated access to {path}, redirecting to login");
             Box::pin(async move {
                 let response = HttpResponse::Found()
                     .insert_header(("Location", login_path))
