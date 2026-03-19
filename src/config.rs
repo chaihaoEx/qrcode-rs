@@ -16,6 +16,7 @@ pub struct ServerConfig {
     #[serde(default)]
     pub context_path: String,
     pub public_host: String,
+    pub extract_salt: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]

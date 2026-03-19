@@ -10,6 +10,29 @@ use crate::config::Config;
 
 const PAGE_SIZE: i64 = 20;
 
+/// 基于 UUID 和盐值生成 HMAC-SHA256 校验哈希（取前 8 位 hex）
+pub fn generate_extract_hash(uuid: &str, salt: &str) -> String {
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+
+    let mut mac = Hmac::<Sha256>::new_from_slice(salt.as_bytes()).unwrap();
+    mac.update(uuid.as_bytes());
+    let result = mac.finalize().into_bytes();
+    format!("{:02x}{:02x}{:02x}{:02x}", result[0], result[1], result[2], result[3])
+}
+
+fn verify_extract_hash(uuid: &str, hash: &str, salt: &str) -> bool {
+    generate_extract_hash(uuid, salt) == hash
+}
+
+fn render_error(tmpl: &Tera, base: &str, message: &str, status: actix_web::http::StatusCode) -> HttpResponse {
+    let mut ctx = Context::new();
+    ctx.insert("base", base);
+    ctx.insert("message", message);
+    let rendered = tmpl.render("error.html", &ctx).unwrap();
+    HttpResponse::build(status).content_type("text/html").body(rendered)
+}
+
 #[derive(sqlx::FromRow, Serialize)]
 pub struct QrCodeRecord {
     pub id: u64,
@@ -152,8 +175,9 @@ pub async fn download_image(
     config: web::Data<Config>,
 ) -> HttpResponse {
     let uuid = path.into_inner();
+    let hash = generate_extract_hash(&uuid, &config.server.extract_salt);
     let url = format!(
-        "{}{}/extract/{uuid}",
+        "{}{}/extract/{uuid}/{hash}",
         config.server.public_host, config.server.context_path
     );
 
@@ -190,13 +214,17 @@ pub async fn download_image(
 // ---- 公开页面 (无需认证) ----
 
 pub async fn extract_page(
-    path: web::Path<String>,
+    path: web::Path<(String, String)>,
     tmpl: web::Data<Tera>,
     pool: web::Data<MySqlPool>,
     config: web::Data<Config>,
 ) -> HttpResponse {
-    let uuid = path.into_inner();
+    let (uuid, hash) = path.into_inner();
     let base = &config.server.context_path;
+
+    if !verify_extract_hash(&uuid, &hash, &config.server.extract_salt) {
+        return render_error(&tmpl, base, "无效二维码", actix_web::http::StatusCode::BAD_REQUEST);
+    }
 
     let record = sqlx::query_as::<_, QrCodeRecord>(
         "SELECT * FROM qr_codes WHERE uuid = ?",
@@ -208,7 +236,7 @@ pub async fn extract_page(
 
     let record = match record {
         Some(r) => r,
-        None => return HttpResponse::NotFound().body("二维码不存在"),
+        None => return render_error(&tmpl, base, "二维码不存在", actix_web::http::StatusCode::NOT_FOUND),
     };
 
     let remaining = record.max_count.saturating_sub(record.used_count);
@@ -216,6 +244,7 @@ pub async fn extract_page(
     let mut ctx = Context::new();
     ctx.insert("base", base);
     ctx.insert("uuid", &uuid);
+    ctx.insert("hash", &hash);
     ctx.insert("created_at", &record.created_at.format("%Y-%m-%d %H:%M:%S").to_string());
     ctx.insert("remaining", &remaining);
 
@@ -224,14 +253,18 @@ pub async fn extract_page(
 }
 
 pub async fn extract_handler(
-    path: web::Path<String>,
+    path: web::Path<(String, String)>,
     tmpl: web::Data<Tera>,
     pool: web::Data<MySqlPool>,
     config: web::Data<Config>,
     req: HttpRequest,
 ) -> HttpResponse {
-    let uuid = path.into_inner();
+    let (uuid, hash) = path.into_inner();
     let base = &config.server.context_path;
+
+    if !verify_extract_hash(&uuid, &hash, &config.server.extract_salt) {
+        return render_error(&tmpl, base, "无效二维码", actix_web::http::StatusCode::BAD_REQUEST);
+    }
 
     let client_ip = req
         .connection_info()
@@ -261,11 +294,12 @@ pub async fn extract_handler(
         .unwrap_or(None);
 
         return match record {
-            None => HttpResponse::NotFound().body("二维码不存在"),
+            None => render_error(&tmpl, base, "二维码不存在", actix_web::http::StatusCode::NOT_FOUND),
             Some(_) => {
                 let mut ctx = Context::new();
                 ctx.insert("base", base);
                 ctx.insert("uuid", &uuid);
+                ctx.insert("hash", &hash);
                 ctx.insert("remaining", &0u32);
                 ctx.insert("created_at", &"");
                 let rendered = tmpl.render("extract.html", &ctx).unwrap();

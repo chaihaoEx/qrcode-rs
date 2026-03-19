@@ -11,7 +11,7 @@
         <p><strong>创建时间：</strong>{{ created_at }}</p>
         <p><strong>剩余提取次数：</strong>{{ remaining }}</p>
     </div>
-    <form method="POST" action="{{ base }}/extract/{{ uuid }}">
+    <form method="POST" action="{{ base }}/extract/{{ uuid }}/{{ hash }}">
         <button type="submit" class="btn btn-primary btn-lg">确认提取</button>
     </form>
     {% else %}
