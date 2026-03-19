@@ -4,43 +4,150 @@
 {% block body_class %}body-extract{% endblock %}
 
 {% block content %}
-<div class="extract-card fade-in">
-    <div class="extract-header">
-        <div class="extract-icon">
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="3" height="3"/>
-            </svg>
+<div id="extractMeta" data-base="{{ base }}" data-uuid="{{ uuid }}" data-hash="{{ hash }}" style="display:none;"></div>
+<div class="extract-card fade-in" id="extractCard">
+    <!-- 初始加载状态 -->
+    <div id="stateLoading">
+        <div class="extract-header">
+            <div class="extract-icon">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="3" height="3"/>
+                </svg>
+            </div>
+            <h1>信息提取</h1>
         </div>
-        <h1>信息提取</h1>
+        <div style="text-align:center;padding:2rem 0;">
+            <div class="spinner"></div>
+            <p style="color:var(--text-muted);margin-top:1rem;font-size:0.9rem;">正在加载…</p>
+        </div>
     </div>
 
-    {% if remaining > 0 %}
-    <div class="extract-meta">
-        <div class="meta-row">
-            <span class="meta-label">创建时间</span>
-            <span class="meta-value">{{ created_at }}</span>
+    <!-- 成功状态（隐藏，JS 切换） -->
+    <div id="stateResult" style="display:none;">
+        <div class="extract-header extract-header-success">
+            <div class="extract-icon success">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>
+                </svg>
+            </div>
+            <h1>提取成功</h1>
         </div>
-        <div class="meta-row">
-            <span class="meta-label">剩余次数</span>
-            <span class="meta-value">
-                <span class="remaining-badge">{{ remaining }}</span>
-            </span>
+        <div class="result-content">
+            <p class="result-text" id="resultText"></p>
         </div>
-    </div>
-    <form method="POST" action="{{ base }}/extract/{{ uuid }}/{{ hash }}">
-        <button type="submit" class="btn btn-primary btn-block btn-extract">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            确认提取
+        <button class="btn btn-primary btn-copy" id="copyBtn">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            复制内容
         </button>
-    </form>
-    <p class="extract-tip">点击后将消耗一次提取次数</p>
-    {% else %}
-    <div class="extract-empty">
-        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.4">
-            <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
-        </svg>
-        <p>该二维码已无剩余提取次数</p>
     </div>
-    {% endif %}
+
+    <!-- 已提取完毕状态（隐藏，JS 切换） -->
+    <div id="stateExhausted" style="display:none;">
+        <div class="extract-header">
+            <div class="extract-icon error">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
+                </svg>
+            </div>
+            <h1 style="color: var(--danger);">已提取完毕</h1>
+        </div>
+        <div class="extract-empty">
+            <p>所有内容已被领取完毕</p>
+            <p class="extract-contact">如需重置，请联系管理员</p>
+        </div>
+    </div>
+
+    <!-- 网络错误状态（隐藏，JS 切换） -->
+    <div id="stateError" style="display:none;">
+        <div class="extract-header">
+            <div class="extract-icon error">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                </svg>
+            </div>
+            <h1>加载失败</h1>
+        </div>
+        <div class="extract-empty">
+            <p>网络请求失败，请稍后重试</p>
+            <button class="btn btn-outline" style="margin-top:1rem;" onclick="window.location.reload()">重新加载</button>
+        </div>
+    </div>
 </div>
+
+<style>
+.spinner {
+    display: inline-block;
+    width: 36px;
+    height: 36px;
+    border: 3px solid rgba(0,0,0,0.1);
+    border-top-color: var(--primary, #6366f1);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+
+<script>
+(function() {
+    var meta = document.getElementById('extractMeta');
+    var BASE = meta.dataset.base;
+    var UUID = meta.dataset.uuid;
+    var HASH = meta.dataset.hash;
+
+    function showState(id) {
+        ['stateLoading','stateResult','stateExhausted','stateError'].forEach(function(s) {
+            document.getElementById(s).style.display = (s === id) ? '' : 'none';
+        });
+    }
+
+    function showResult(text) {
+        document.getElementById('resultText').textContent = text;
+        showState('stateResult');
+        var btn = document.getElementById('copyBtn');
+        btn.addEventListener('click', function() {
+            navigator.clipboard.writeText(text).then(function() {
+                btn.textContent = '已复制';
+                btn.classList.add('btn-copied');
+                setTimeout(function() {
+                    btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg> 复制内容';
+                    btn.classList.remove('btn-copied');
+                }, 1500);
+            });
+        });
+    }
+
+    function uuid4() {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+            var r = Math.random() * 16 | 0;
+            var v = c === 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
+    }
+
+    var bid = localStorage.getItem('qr_browser_id');
+    if (!bid) {
+        bid = uuid4();
+        localStorage.setItem('qr_browser_id', bid);
+    }
+
+    fetch(BASE + '/extract/' + UUID + '/' + HASH + '/claim', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({browser_id: bid})
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.status === 'ok') {
+            showResult(data.text_content);
+        } else if (data.status === 'exhausted') {
+            showState('stateExhausted');
+        } else {
+            showState('stateError');
+        }
+    })
+    .catch(function() {
+        showState('stateError');
+    });
+})();
+</script>
 {% endblock %}
