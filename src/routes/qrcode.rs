@@ -89,6 +89,7 @@ pub async fn list_page(
     let page = query.page.unwrap_or(1).max(1);
     let keyword = query.keyword.clone().unwrap_or_default();
     let offset = (page - 1) * PAGE_SIZE;
+    log::debug!("list_page: page={page}, keyword={keyword:?}");
 
     let (total, records) = if keyword.is_empty() {
         let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM qr_codes")
@@ -182,6 +183,8 @@ pub async fn create_handler(
     .execute(pool.get_ref())
     .await;
 
+    log::info!("QR code created: uuid={uuid}, max_count={max_count}");
+
     HttpResponse::Found()
         .insert_header(("Location", format!("{base}/")))
         .finish()
@@ -192,6 +195,7 @@ pub async fn download_image(
     config: web::Data<Config>,
 ) -> HttpResponse {
     let uuid = path.into_inner();
+    log::info!("Download QR image: uuid={uuid}");
     let hash = generate_extract_hash(&uuid, &config.server.extract_salt);
     let url = format!(
         "{}{}/extract/{uuid}/{hash}",
@@ -238,6 +242,7 @@ pub async fn extract_page(
 ) -> HttpResponse {
     let (uuid, hash) = path.into_inner();
     let base = &config.server.context_path;
+    log::debug!("Extract page visited: uuid={uuid}");
 
     if !verify_extract_hash(&uuid, &hash, &config.server.extract_salt) {
         return render_error(&tmpl, base, "无效二维码", actix_web::http::StatusCode::BAD_REQUEST);
@@ -298,17 +303,26 @@ pub async fn extract_handler(
     .execute(pool.get_ref())
     .await;
 
-    let rows_affected = result.map(|r| r.rows_affected()).unwrap_or(0);
+    let rows_affected = match &result {
+        Ok(r) => r.rows_affected(),
+        Err(e) => {
+            log::warn!("Extract UPDATE failed: uuid={uuid}, error={e}");
+            0
+        }
+    };
 
     if rows_affected > 0 {
         // 记录提取日志
-        let _ = sqlx::query(
+        if let Err(e) = sqlx::query(
             "INSERT INTO qr_extract_logs (qrcode_id, client_ip, extracted_at) SELECT id, ?, NOW() FROM qr_codes WHERE uuid = ?",
         )
         .bind(&client_ip)
         .bind(&uuid)
         .execute(pool.get_ref())
-        .await;
+        .await
+        {
+            log::warn!("Extract log INSERT failed: uuid={uuid}, error={e}");
+        }
     }
 
     if rows_affected == 0 {
@@ -322,8 +336,12 @@ pub async fn extract_handler(
         .unwrap_or(None);
 
         return match record {
-            None => render_error(&tmpl, base, "二维码不存在", actix_web::http::StatusCode::NOT_FOUND),
+            None => {
+                log::warn!("Extract failed: uuid={uuid} not found, ip={client_ip}");
+                render_error(&tmpl, base, "二维码不存在", actix_web::http::StatusCode::NOT_FOUND)
+            }
             Some(_) => {
+                log::warn!("Extract failed: uuid={uuid} exhausted, ip={client_ip}");
                 let mut ctx = Context::new();
                 ctx.insert("base", base);
                 ctx.insert("uuid", &uuid);
@@ -336,7 +354,8 @@ pub async fn extract_handler(
         };
     }
 
-    // 提取成功，查询最新记录
+    // 提取成功
+    log::info!("Extract success: uuid={uuid}, ip={client_ip}");
     let record = sqlx::query_as::<_, QrCodeRecord>(
         "SELECT * FROM qr_codes WHERE uuid = ?",
     )
@@ -373,6 +392,7 @@ pub async fn extract_logs_page(
     let list_page = query.list_page.unwrap_or(1);
     let list_keyword = query.list_keyword.clone().unwrap_or_default();
     let offset = (page - 1) * PAGE_SIZE;
+    log::debug!("Extract logs page: uuid={uuid}, page={page}");
 
     let record = sqlx::query_as::<_, QrCodeRecord>(
         "SELECT * FROM qr_codes WHERE uuid = ?",
