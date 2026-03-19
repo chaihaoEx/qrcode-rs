@@ -57,12 +57,12 @@
                     {% for record in records %}
                     <tr>
                         <td class="cell-time">{{ record.created_at }}</td>
-                        <td><span class="text-truncate" title="{{ record.text_content }}">{{ record.text_content | truncate(length=40) }}</span></td>
+                        <td><span class="text-truncate">{{ display_texts[record.uuid] }}</span></td>
                         <td class="cell-muted">{{ record.remark | default(value="-") }}</td>
                         <td class="col-num">
-                            <span class="badge {% if record.used_count >= record.max_count %}badge-exhausted{% elif record.used_count > 0 %}badge-active{% else %}badge-idle{% endif %}">
+                            <span class="badge {% if record.used_count > 0 %}badge-active{% else %}badge-idle{% endif %}">
                                 {{ record.used_count }}
-                            </span> / {{ record.max_count }}
+                            </span> 次 / 每IP {{ record.max_count }} 次
                         </td>
                         <td class="cell-mono">{{ record.last_extract_ip | default(value="-") }}</td>
                         <td class="cell-time">{% if record.last_extract_at %}{{ record.last_extract_at }}{% else %}-{% endif %}</td>
@@ -80,7 +80,7 @@
                                 <a href="{{ base }}/edit/{{ record.uuid }}" class="action-btn" title="编辑">
                                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                                 </a>
-                                <a href="#" class="action-btn" title="重置提取次数" onclick="if(confirm('确定要重置提取次数吗？已用次数将归零。')){var f=document.createElement('form');f.method='POST';f.action='{{ base }}/reset/{{ record.uuid }}';document.body.appendChild(f);f.submit();}return false;">
+                                <a href="#" class="action-btn" title="重置提取次数" onclick="if(confirm('确定要重置所有IP的提取次数吗？总提取次数不会归零。')){var f=document.createElement('form');f.method='POST';f.action='{{ base }}/reset/{{ record.uuid }}';document.body.appendChild(f);f.submit();}return false;">
                                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
                                 </a>
                                 <a href="#" class="action-btn action-btn-danger" title="删除" onclick="if(confirm('确定要删除此二维码吗？此操作不可恢复。')){var f=document.createElement('form');f.method='POST';f.action='{{ base }}/delete/{{ record.uuid }}';document.body.appendChild(f);f.submit();}return false;">

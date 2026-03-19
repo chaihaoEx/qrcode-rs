@@ -25,20 +25,32 @@
     </div>
 
     <div class="admin-card">
-        <form method="POST" action="{{ base }}/create" class="form-create">
+        <form method="POST" action="{{ base }}/create" class="form-create" id="createForm">
             <div class="field">
-                <label for="text_content">文字内容 <span class="required">*</span></label>
-                <textarea id="text_content" name="text_content" rows="5" required placeholder="输入二维码包含的文字内容..."></textarea>
-                <p class="field-hint">扫描二维码后，用户确认提取即可看到此内容</p>
+                <label>文字内容 <span class="required">*</span></label>
+                <div id="segments">
+                    <div class="segment-item">
+                        <div class="segment-header">
+                            <span class="segment-label">第 1 段</span>
+                            <button type="button" class="btn btn-ghost btn-sm segment-remove" style="display:none">删除</button>
+                        </div>
+                        <textarea rows="3" class="segment-input" placeholder="输入内容段落..."></textarea>
+                    </div>
+                </div>
+                <button type="button" id="addSegment" class="btn btn-outline btn-sm" style="margin-top:0.5rem">
+                    + 添加内容段落
+                </button>
+                <input type="hidden" name="text_content" id="text_content_hidden">
+                <p class="field-hint">每个段落将随机展示给扫码用户，每段可以包含换行</p>
             </div>
             <div class="field">
                 <label for="remark">备注</label>
                 <input type="text" id="remark" name="remark" placeholder="选填，方便后续查找">
             </div>
             <div class="field">
-                <label for="max_count">最大提取次数</label>
+                <label for="max_count">每IP最大提取次数</label>
                 <input type="number" id="max_count" name="max_count" value="5" min="1">
-                <p class="field-hint">达到此次数后，二维码将不可再被提取</p>
+                <p class="field-hint">每个 IP 地址最多可提取此次数</p>
             </div>
             <div class="form-actions">
                 <a href="{{ base }}/" class="btn btn-ghost">取消</a>
@@ -50,4 +62,48 @@
         </form>
     </div>
 </main>
+
+<script>
+(function() {
+    function updateSegmentLabels() {
+        var items = document.querySelectorAll('.segment-item');
+        items.forEach(function(item, i) {
+            item.querySelector('.segment-label').textContent = '第 ' + (i + 1) + ' 段';
+            item.querySelector('.segment-remove').style.display = items.length > 1 ? '' : 'none';
+        });
+    }
+
+    document.getElementById('addSegment').addEventListener('click', function() {
+        var container = document.getElementById('segments');
+        var item = document.createElement('div');
+        item.className = 'segment-item';
+        item.innerHTML = '<div class="segment-header"><span class="segment-label"></span><button type="button" class="btn btn-ghost btn-sm segment-remove">删除</button></div><textarea rows="3" class="segment-input" placeholder="输入内容段落..."></textarea>';
+        container.appendChild(item);
+        updateSegmentLabels();
+        item.querySelector('.segment-input').focus();
+    });
+
+    document.getElementById('segments').addEventListener('click', function(e) {
+        if (e.target.classList.contains('segment-remove')) {
+            e.target.closest('.segment-item').remove();
+            updateSegmentLabels();
+        }
+    });
+
+    document.getElementById('createForm').addEventListener('submit', function(e) {
+        var textareas = document.querySelectorAll('.segment-input');
+        var segments = [];
+        textareas.forEach(function(ta) {
+            var val = ta.value.trim();
+            if (val) segments.push(val);
+        });
+        if (segments.length === 0) {
+            e.preventDefault();
+            alert('请至少输入一段内容');
+            return;
+        }
+        document.getElementById('text_content_hidden').value = JSON.stringify(segments);
+    });
+})();
+</script>
 {% endblock %}
