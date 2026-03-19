@@ -2412,7 +2412,7 @@ dependencies = [
 
 [[package]]
 name = "qrcode-rs"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "actix-files",
  "actix-session",
