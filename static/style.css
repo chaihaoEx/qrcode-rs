@@ -423,7 +423,7 @@ a:hover { color: var(--primary-dark); }
 }
 
 .data-table th {
-    padding: 10px 16px;
+    padding: 10px 14px;
     text-align: left;
     font-size: 11px;
     font-weight: 600;
@@ -436,7 +436,7 @@ a:hover { color: var(--primary-dark); }
 }
 
 .data-table td {
-    padding: 12px 16px;
+    padding: 10px 14px;
     border-bottom: 1px solid var(--gray-100);
     color: var(--gray-700);
     white-space: nowrap;
@@ -447,7 +447,35 @@ a:hover { color: var(--primary-dark); }
 .data-table tbody tr:last-child td { border-bottom: none; }
 
 .col-num { text-align: center; }
-.col-action { text-align: right; }
+.col-action { text-align: center; width: 1%; white-space: nowrap; }
+
+/* ---- Action Buttons (icon-only) ---- */
+
+.action-group {
+    display: inline-flex;
+    gap: 2px;
+    background: var(--gray-50);
+    border-radius: 8px;
+    padding: 2px;
+}
+
+.action-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    color: var(--gray-400);
+    transition: all 0.15s ease;
+    text-decoration: none;
+}
+
+.action-btn:hover {
+    background: #fff;
+    color: var(--primary);
+    box-shadow: var(--shadow-sm);
+}
 
 .cell-time {
     font-family: var(--font-mono);
@@ -464,7 +492,7 @@ a:hover { color: var(--primary-dark); }
 
 .text-truncate {
     display: inline-block;
-    max-width: 220px;
+    max-width: 260px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -786,6 +814,25 @@ a:hover { color: var(--primary-dark); }
     text-align: center;
 }
 
+.btn-copy {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    width: 100%;
+    margin-bottom: 24px;
+    padding: 10px;
+    font-size: 15px;
+    transition: background 0.2s, transform 0.1s;
+}
+
+.btn-copy:active { transform: scale(0.98); }
+
+.btn-copied {
+    background: var(--success) !important;
+    border-color: var(--success) !important;
+}
+
 /* ---- Extract Empty ---- */
 
 .extract-empty {
@@ -817,10 +864,13 @@ a:hover { color: var(--primary-dark); }
 
     .search-bar { max-width: none; }
 
-    .data-table th { padding: 8px 12px; }
-    .data-table td { padding: 10px 12px; font-size: 12px; }
+    .data-table th { padding: 8px 10px; }
+    .data-table td { padding: 8px 10px; font-size: 12px; }
 
     .text-truncate { max-width: 140px; }
+
+    .action-btn { width: 28px; height: 28px; }
+    .action-btn svg { width: 13px; height: 13px; }
 
     .pagination { gap: 2px; padding: 12px 12px; }
     .page-btn { min-width: 28px; height: 28px; font-size: 12px; }
