@@ -29,7 +29,6 @@ mod option_datetime_format {
     }
 }
 use image::ImageEncoder;
-use rand::Rng;
 use serde::{Deserialize, Serialize};
 use sqlx::MySqlPool;
 use tera::{Context, Tera};
@@ -127,9 +126,22 @@ pub struct ExtractLog {
     pub id: u64,
     pub qrcode_id: u64,
     pub client_ip: String,
+    pub browser_id: String,
     pub segment_index: Option<u32>,
     #[serde(serialize_with = "datetime_format::serialize")]
     pub extracted_at: NaiveDateTime,
+}
+
+#[derive(Deserialize)]
+pub struct ClaimRequest {
+    pub browser_id: String,
+}
+
+#[derive(Serialize)]
+pub struct ClaimResponse {
+    pub status: String,
+    pub text_content: Option<String>,
+    pub segment_index: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -370,14 +382,12 @@ pub async fn download_image(
 
 // ---- 公开页面 (无需认证) ----
 
-/// 扫码直接提取（GET 请求直接执行提取，无需确认步骤）
-/// 按IP独立计数，随机显示一段文字
+/// 扫码落地页（GET）：仅验证 HMAC 和 UUID 存在性，渲染骨架，内容由前端 AJAX 获取
 pub async fn extract_page(
     path: web::Path<(String, String)>,
     tmpl: web::Data<Tera>,
     pool: web::Data<MySqlPool>,
     config: web::Data<Config>,
-    req: HttpRequest,
 ) -> HttpResponse {
     let (uuid, hash) = path.into_inner();
     let base = &config.server.context_path;
@@ -387,118 +397,170 @@ pub async fn extract_page(
         return render_error(&tmpl, base, "无效二维码", actix_web::http::StatusCode::BAD_REQUEST);
     }
 
+    let exists: Option<u64> = sqlx::query_scalar("SELECT id FROM qr_codes WHERE uuid = ?")
+        .bind(&uuid)
+        .fetch_optional(pool.get_ref())
+        .await
+        .unwrap_or(None);
+
+    if exists.is_none() {
+        return render_error(&tmpl, base, "二维码不存在", actix_web::http::StatusCode::NOT_FOUND);
+    }
+
+    let mut ctx = Context::new();
+    ctx.insert("base", base);
+    ctx.insert("uuid", &uuid);
+    ctx.insert("hash", &hash);
+
+    render_template(&tmpl, "extract.html", &ctx)
+}
+
+/// 领取槽位（POST /extract/{uuid}/{hash}/claim）
+/// browser_id 唯一标识浏览器，每个 browser_id 顺序独占一段
+pub async fn extract_claim_handler(
+    path: web::Path<(String, String)>,
+    body: web::Json<ClaimRequest>,
+    pool: web::Data<MySqlPool>,
+    config: web::Data<Config>,
+    req: HttpRequest,
+) -> HttpResponse {
+    let (uuid, hash) = path.into_inner();
+
+    if !verify_extract_hash(&uuid, &hash, &config.server.extract_salt) {
+        return HttpResponse::BadRequest().json(serde_json::json!({"status": "error", "message": "invalid hash"}));
+    }
+
+    let browser_id = body.browser_id.trim().to_string();
+    // 校验：仅允许 UUID 格式（字母数字和连字符，长度 ≤ 36）
+    if browser_id.is_empty() || browser_id.len() > 36 || !browser_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return HttpResponse::BadRequest().json(serde_json::json!({"status": "error", "message": "invalid browser_id"}));
+    }
+
     let client_ip = req
         .connection_info()
         .realip_remote_addr()
         .unwrap_or("unknown")
         .to_string();
 
-    // 1. 查询二维码记录
+    let mut tx = match pool.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            log::warn!("Extract claim: begin transaction failed: uuid={uuid}, error={e}");
+            return HttpResponse::InternalServerError().json(serde_json::json!({"status": "error"}));
+        }
+    };
+
+    // 行锁
     let record = sqlx::query_as::<_, QrCodeRecord>(
-        "SELECT * FROM qr_codes WHERE uuid = ?",
+        "SELECT * FROM qr_codes WHERE uuid = ? FOR UPDATE",
     )
     .bind(&uuid)
-    .fetch_optional(pool.get_ref())
+    .fetch_optional(&mut *tx)
     .await
     .unwrap_or(None);
 
     let record = match record {
         Some(r) => r,
         None => {
-            log::warn!("Extract failed: uuid={uuid} not found, ip={client_ip}");
-            return render_error(&tmpl, base, "二维码不存在", actix_web::http::StatusCode::NOT_FOUND);
+            let _ = tx.rollback().await;
+            return HttpResponse::NotFound().json(serde_json::json!({"status": "error", "message": "not found"}));
         }
     };
 
-    // 2. 按IP原子计数（拆为两步，避免 CLIENT_FOUND_ROWS 导致 rows_affected 不可靠）
-    // 2a. 确保行存在
-    if let Err(e) = sqlx::query(
-        "INSERT IGNORE INTO qr_ip_extracts (qrcode_id, client_ip, used_count) VALUES (?, ?, 0)",
+    // 幂等：检查该 browser_id 是否已有槽位
+    let existing_slot: Option<u32> = sqlx::query_scalar(
+        "SELECT segment_index FROM qr_browser_slots WHERE qrcode_id = ? AND browser_id = ?",
     )
     .bind(record.id)
-    .bind(&client_ip)
-    .execute(pool.get_ref())
-    .await
-    {
-        log::warn!("Extract IP insert failed: uuid={uuid}, ip={client_ip}, error={e}");
-    }
-
-    // 2b. 原子递增，WHERE 不匹配时 rows_affected 一定为 0
-    let result = sqlx::query(
-        "UPDATE qr_ip_extracts SET used_count = used_count + 1 WHERE qrcode_id = ? AND client_ip = ? AND used_count < ?",
-    )
-    .bind(record.id)
-    .bind(&client_ip)
-    .bind(record.max_count)
-    .execute(pool.get_ref())
-    .await;
-
-    let rows_affected = match &result {
-        Ok(r) => r.rows_affected(),
-        Err(e) => {
-            log::warn!("Extract IP count failed: uuid={uuid}, ip={client_ip}, error={e}");
-            0
-        }
-    };
-
-    if rows_affected == 0 {
-        log::warn!("Extract failed: uuid={uuid} exhausted for ip={client_ip}");
-        let mut ctx = Context::new();
-        ctx.insert("base", base);
-        return render_template(&tmpl, "extract_exhausted.html", &ctx);
-    }
-
-    // 3. 查询当前IP的已用次数
-    let ip_used: Option<u32> = sqlx::query_scalar(
-        "SELECT used_count FROM qr_ip_extracts WHERE qrcode_id = ? AND client_ip = ?",
-    )
-    .bind(record.id)
-    .bind(&client_ip)
-    .fetch_optional(pool.get_ref())
+    .bind(&browser_id)
+    .fetch_optional(&mut *tx)
     .await
     .unwrap_or(None);
 
-    let ip_used = ip_used.unwrap_or(1);
-    let remaining = record.max_count.saturating_sub(ip_used);
+    if let Some(seg_idx) = existing_slot {
+        let _ = tx.commit().await;
+        let segments = parse_segments(&record.text_content);
+        let text = segments.get(seg_idx as usize).cloned().unwrap_or_default();
+        log::debug!("Extract claim idempotent: uuid={uuid}, browser_id={browser_id}, segment={seg_idx}");
+        return HttpResponse::Ok().json(ClaimResponse {
+            status: "ok".to_string(),
+            text_content: Some(text),
+            segment_index: Some(seg_idx),
+        });
+    }
 
-    // 4. 解析多段文字，随机选一段
     let segments = parse_segments(&record.text_content);
-    let segment_index = rand::thread_rng().gen_range(0..segments.len());
-    let selected_text = &segments[segment_index];
 
-    // 5. 记录提取日志（含段落索引）
+    if record.used_count as usize >= segments.len() {
+        let _ = tx.rollback().await;
+        log::warn!("Extract claim exhausted: uuid={uuid}, used={}, segments={}", record.used_count, segments.len());
+        return HttpResponse::Ok().json(ClaimResponse {
+            status: "exhausted".to_string(),
+            text_content: None,
+            segment_index: None,
+        });
+    }
+
+    let segment_index = record.used_count as u32;
+    let text = segments[segment_index as usize].clone();
+
+    // 插入槽位
     if let Err(e) = sqlx::query(
-        "INSERT INTO qr_extract_logs (qrcode_id, client_ip, segment_index, extracted_at) VALUES (?, ?, ?, NOW())",
+        "INSERT INTO qr_browser_slots (qrcode_id, browser_id, segment_index, client_ip) VALUES (?, ?, ?, ?)",
+    )
+    .bind(record.id)
+    .bind(&browser_id)
+    .bind(segment_index)
+    .bind(&client_ip)
+    .execute(&mut *tx)
+    .await
+    {
+        let _ = tx.rollback().await;
+        log::warn!("Extract claim: insert slot failed: uuid={uuid}, error={e}");
+        return HttpResponse::InternalServerError().json(serde_json::json!({"status": "error"}));
+    }
+
+    // 更新主表
+    if let Err(e) = sqlx::query(
+        "UPDATE qr_codes SET used_count = used_count + 1, last_extract_ip = ?, last_extract_at = NOW() WHERE id = ?",
+    )
+    .bind(&client_ip)
+    .bind(record.id)
+    .execute(&mut *tx)
+    .await
+    {
+        let _ = tx.rollback().await;
+        log::warn!("Extract claim: update qr_codes failed: uuid={uuid}, error={e}");
+        return HttpResponse::InternalServerError().json(serde_json::json!({"status": "error"}));
+    }
+
+    // 写提取日志
+    if let Err(e) = sqlx::query(
+        "INSERT INTO qr_extract_logs (qrcode_id, client_ip, browser_id, segment_index, extracted_at) VALUES (?, ?, ?, ?, NOW())",
     )
     .bind(record.id)
     .bind(&client_ip)
-    .bind(segment_index as u32)
-    .execute(pool.get_ref())
+    .bind(&browser_id)
+    .bind(segment_index)
+    .execute(&mut *tx)
     .await
     {
-        log::warn!("Extract log INSERT failed: uuid={uuid}, error={e}");
+        log::warn!("Extract claim: insert log failed: uuid={uuid}, error={e}");
+        // 日志失败不中止事务
     }
 
-    // 6. 更新总提取次数和最后提取信息（非关键）
-    if let Err(e) = sqlx::query(
-        "UPDATE qr_codes SET used_count = used_count + 1, last_extract_ip = ?, last_extract_at = NOW() WHERE uuid = ?",
-    )
-    .bind(&client_ip)
-    .bind(&uuid)
-    .execute(pool.get_ref())
-    .await
-    {
-        log::warn!("Update total count failed: uuid={uuid}, error={e}");
+    if let Err(e) = tx.commit().await {
+        log::warn!("Extract claim: commit failed: uuid={uuid}, error={e}");
+        return HttpResponse::InternalServerError().json(serde_json::json!({"status": "error"}));
     }
 
-    log::info!("Extract success: uuid={uuid}, ip={client_ip}, segment={segment_index}");
+    log::info!("Extract claim success: uuid={uuid}, ip={client_ip}, browser_id={browser_id}, segment={segment_index}");
 
-    let mut ctx = Context::new();
-    ctx.insert("base", base);
-    ctx.insert("text_content", selected_text);
-    ctx.insert("remaining", &remaining);
-
-    render_template(&tmpl, "extract_result.html", &ctx)
+    HttpResponse::Ok().json(ClaimResponse {
+        status: "ok".to_string(),
+        text_content: Some(text),
+        segment_index: Some(segment_index),
+    })
 }
 
 // ---- 删除 (需认证) ----
@@ -528,7 +590,7 @@ pub async fn delete_handler(
 }
 
 // ---- 重置提取次数 (需认证) ----
-// 只清除按IP计数，总提取次数不归零
+// 清除所有槽位并将 used_count 归零
 
 pub async fn reset_handler(
     path: web::Path<String>,
@@ -539,18 +601,42 @@ pub async fn reset_handler(
     let uuid = path.into_inner();
     let base = &config.server.context_path;
 
+    let mut tx = match pool.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            log::warn!("Reset failed: begin transaction: uuid={uuid}, error={e}");
+            return render_error(&tmpl, base, "重置失败，请稍后重试", actix_web::http::StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+
     if let Err(e) = sqlx::query(
-        "DELETE FROM qr_ip_extracts WHERE qrcode_id = (SELECT id FROM qr_codes WHERE uuid = ?)",
+        "DELETE FROM qr_browser_slots WHERE qrcode_id = (SELECT id FROM qr_codes WHERE uuid = ?)",
     )
     .bind(&uuid)
-    .execute(pool.get_ref())
+    .execute(&mut *tx)
     .await
     {
-        log::warn!("Reset failed: uuid={uuid}, error={e}");
+        let _ = tx.rollback().await;
+        log::warn!("Reset failed: delete slots: uuid={uuid}, error={e}");
         return render_error(&tmpl, base, "重置失败，请稍后重试", actix_web::http::StatusCode::INTERNAL_SERVER_ERROR);
     }
 
-    log::info!("QR code IP counts reset: uuid={uuid}");
+    if let Err(e) = sqlx::query("UPDATE qr_codes SET used_count = 0 WHERE uuid = ?")
+        .bind(&uuid)
+        .execute(&mut *tx)
+        .await
+    {
+        let _ = tx.rollback().await;
+        log::warn!("Reset failed: update used_count: uuid={uuid}, error={e}");
+        return render_error(&tmpl, base, "重置失败，请稍后重试", actix_web::http::StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    if let Err(e) = tx.commit().await {
+        log::warn!("Reset failed: commit: uuid={uuid}, error={e}");
+        return render_error(&tmpl, base, "重置失败，请稍后重试", actix_web::http::StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    log::info!("QR code slots reset: uuid={uuid}");
     HttpResponse::Found()
         .insert_header(("Location", format!("{base}/")))
         .finish()

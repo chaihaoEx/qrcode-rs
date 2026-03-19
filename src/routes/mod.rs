@@ -13,6 +13,7 @@ pub fn configure(context_path: String) -> impl FnOnce(&mut web::ServiceConfig) {
                 .route("/create", web::post().to(qrcode::create_handler))
                 .route("/qrcode-image/{uuid}", web::get().to(qrcode::download_image))
                 .route("/extract/{uuid}/{hash}", web::get().to(qrcode::extract_page))
+                .route("/extract/{uuid}/{hash}/claim", web::post().to(qrcode::extract_claim_handler))
                 .route("/delete/{uuid}", web::post().to(qrcode::delete_handler))
                 .route("/reset/{uuid}", web::post().to(qrcode::reset_handler))
                 .route("/edit/{uuid}", web::get().to(qrcode::edit_page))
