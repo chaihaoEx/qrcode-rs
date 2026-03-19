@@ -17,6 +17,20 @@ jobs:
     - uses: dtolnay/rust-toolchain@stable
     - uses: Swatinem/rust-cache@v2
     - name: Build
-      run: cargo build --verbose
+      run: cargo build --release --verbose
     - name: Run tests
       run: cargo test --verbose
+    - name: Package artifact
+      run: |
+        mkdir -p artifact
+        cp target/release/qrcode-rs artifact/
+        cp -r templates artifact/
+        cp -r static artifact/
+        cp -r sql artifact/
+        cp config.example.toml artifact/
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: qrcode-rs-linux-x86_64
+        path: artifact/
+        retention-days: 30
