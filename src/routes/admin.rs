@@ -8,6 +8,7 @@ use crate::config::Config;
 use crate::csrf;
 use crate::helpers::*;
 use crate::models::*;
+use crate::{db_try, db_try_optional};
 
 pub async fn list_page(
     tmpl: web::Data<Tera>,
@@ -22,101 +23,67 @@ pub async fn list_page(
         .unwrap_or(None)
         .unwrap_or_default();
     let csrf_token = csrf::ensure_csrf_token(&session);
-    let page = query.page.unwrap_or(1).clamp(1, 100_000);
     let keyword = query.keyword.clone().unwrap_or_default();
-    let offset = (page - 1) * PAGE_SIZE;
+    let (page, offset) = calc_page_offset(query.page);
     log::debug!("list_page: page={page}, keyword={keyword:?}");
 
     let (total, records) = if keyword.is_empty() {
-        let total: i64 = match sqlx::query_scalar("SELECT COUNT(*) FROM qr_codes")
-            .fetch_one(pool.get_ref())
-            .await
-        {
-            Ok(count) => count,
-            Err(e) => {
-                log::warn!("DB query failed: {e}");
-                return render_error(
-                    &tmpl,
-                    base,
-                    "数据库查询失败",
-                    actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
-                );
-            }
-        };
+        let total: i64 = db_try!(
+            sqlx::query_scalar("SELECT COUNT(*) FROM qr_codes")
+                .fetch_one(pool.get_ref())
+                .await,
+            &tmpl,
+            base
+        );
 
-        let records = match sqlx::query_as::<_, QrCodeRecord>(
-            "SELECT * FROM qr_codes ORDER BY created_at DESC LIMIT ? OFFSET ?",
-        )
-        .bind(PAGE_SIZE)
-        .bind(offset)
-        .fetch_all(pool.get_ref())
-        .await
-        {
-            Ok(r) => r,
-            Err(e) => {
-                log::warn!("DB query failed: {e}");
-                return render_error(
-                    &tmpl,
-                    base,
-                    "数据库查询失败",
-                    actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
-                );
-            }
-        };
+        let records = db_try!(
+            sqlx::query_as::<_, QrCodeRecord>(
+                "SELECT * FROM qr_codes ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            )
+            .bind(PAGE_SIZE)
+            .bind(offset)
+            .fetch_all(pool.get_ref())
+            .await,
+            &tmpl,
+            base
+        );
 
         (total, records)
     } else {
         // Note: %keyword% LIKE on TEXT column cannot use index.
-        // For remark (VARCHAR), idx_remark helps with suffix-anchored patterns only.
         // At current scale this is acceptable; consider full-text search if data grows large.
         let like_pattern = format!("%{keyword}%");
 
-        let total: i64 = match sqlx::query_scalar(
-            "SELECT COUNT(*) FROM qr_codes WHERE text_content LIKE ? OR remark LIKE ?",
-        )
-        .bind(&like_pattern)
-        .bind(&like_pattern)
-        .fetch_one(pool.get_ref())
-        .await
-        {
-            Ok(count) => count,
-            Err(e) => {
-                log::warn!("DB query failed: {e}");
-                return render_error(
-                    &tmpl,
-                    base,
-                    "数据库查询失败",
-                    actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
-                );
-            }
-        };
+        let total: i64 = db_try!(
+            sqlx::query_scalar(
+                "SELECT COUNT(*) FROM qr_codes WHERE text_content LIKE ? OR remark LIKE ?",
+            )
+            .bind(&like_pattern)
+            .bind(&like_pattern)
+            .fetch_one(pool.get_ref())
+            .await,
+            &tmpl,
+            base
+        );
 
-        let records = match sqlx::query_as::<_, QrCodeRecord>(
-            "SELECT * FROM qr_codes WHERE text_content LIKE ? OR remark LIKE ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
-        )
-        .bind(&like_pattern)
-        .bind(&like_pattern)
-        .bind(PAGE_SIZE)
-        .bind(offset)
-        .fetch_all(pool.get_ref())
-        .await
-        {
-            Ok(r) => r,
-            Err(e) => {
-                log::warn!("DB query failed: {e}");
-                return render_error(
-                    &tmpl,
-                    base,
-                    "数据库查询失败",
-                    actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
-                );
-            }
-        };
+        let records = db_try!(
+            sqlx::query_as::<_, QrCodeRecord>(
+                "SELECT * FROM qr_codes WHERE text_content LIKE ? OR remark LIKE ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            )
+            .bind(&like_pattern)
+            .bind(&like_pattern)
+            .bind(PAGE_SIZE)
+            .bind(offset)
+            .fetch_all(pool.get_ref())
+            .await,
+            &tmpl,
+            base
+        );
 
         (total, records)
     };
 
-    let total_pages = (total + PAGE_SIZE - 1) / PAGE_SIZE;
+    let total_pages = calc_total_pages(total);
 
     let extract_hashes: std::collections::HashMap<String, String> = records
         .iter()
@@ -412,32 +379,15 @@ pub async fn edit_page(
         .unwrap_or_default();
     let csrf_token = csrf::ensure_csrf_token(&session);
 
-    let record = match sqlx::query_as::<_, QrCodeRecord>(
-        "SELECT * FROM qr_codes WHERE uuid = ?",
-    )
-    .bind(&uuid)
-    .fetch_optional(pool.get_ref())
-    .await
-    {
-        Ok(Some(r)) => r,
-        Ok(None) => {
-            return render_error(
-                &tmpl,
-                base,
-                "二维码不存在",
-                actix_web::http::StatusCode::NOT_FOUND,
-            )
-        }
-        Err(e) => {
-            log::warn!("DB query failed: {e}");
-            return render_error(
-                &tmpl,
-                base,
-                "数据库查询失败",
-                actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
-            );
-        }
-    };
+    let record = db_try_optional!(
+        sqlx::query_as::<_, QrCodeRecord>("SELECT * FROM qr_codes WHERE uuid = ?",)
+            .bind(&uuid)
+            .fetch_optional(pool.get_ref())
+            .await,
+        &tmpl,
+        base,
+        "二维码不存在"
+    );
 
     let segments = parse_segments(&record.text_content);
 
@@ -520,80 +470,44 @@ pub async fn extract_logs_page(
         .get::<String>("user")
         .unwrap_or(None)
         .unwrap_or_default();
-    let page = query.page.unwrap_or(1).clamp(1, 100_000);
+    let (page, offset) = calc_page_offset(query.page);
     let list_page = query.list_page.unwrap_or(1);
     let list_keyword = query.list_keyword.clone().unwrap_or_default();
-    let offset = (page - 1) * PAGE_SIZE;
     log::debug!("Extract logs page: uuid={uuid}, page={page}");
 
-    let record = match sqlx::query_as::<_, QrCodeRecord>(
-        "SELECT * FROM qr_codes WHERE uuid = ?",
-    )
-    .bind(&uuid)
-    .fetch_optional(pool.get_ref())
-    .await
-    {
-        Ok(Some(r)) => r,
-        Ok(None) => {
-            return render_error(
-                &tmpl,
-                base,
-                "二维码不存在",
-                actix_web::http::StatusCode::NOT_FOUND,
-            )
-        }
-        Err(e) => {
-            log::warn!("DB query failed: {e}");
-            return render_error(
-                &tmpl,
-                base,
-                "数据库查询失败",
-                actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
-            );
-        }
-    };
+    let record = db_try_optional!(
+        sqlx::query_as::<_, QrCodeRecord>("SELECT * FROM qr_codes WHERE uuid = ?",)
+            .bind(&uuid)
+            .fetch_optional(pool.get_ref())
+            .await,
+        &tmpl,
+        base,
+        "二维码不存在"
+    );
 
-    let total: i64 = match sqlx::query_scalar(
-        "SELECT COUNT(*) FROM qr_extract_logs WHERE qrcode_id = ?",
-    )
-    .bind(record.id)
-    .fetch_one(pool.get_ref())
-    .await
-    {
-        Ok(count) => count,
-        Err(e) => {
-            log::warn!("DB query failed: {e}");
-            return render_error(
-                &tmpl,
-                base,
-                "数据库查询失败",
-                actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
-            );
-        }
-    };
+    let total: i64 = db_try!(
+        sqlx::query_scalar("SELECT COUNT(*) FROM qr_extract_logs WHERE qrcode_id = ?",)
+            .bind(record.id)
+            .fetch_one(pool.get_ref())
+            .await,
+        &tmpl,
+        base
+    );
 
-    let logs = match sqlx::query_as::<_, ExtractLog>(
-        "SELECT * FROM qr_extract_logs WHERE qrcode_id = ? ORDER BY extracted_at DESC LIMIT ? OFFSET ?",
-    )
-    .bind(record.id)
-    .bind(PAGE_SIZE)
-    .bind(offset)
-    .fetch_all(pool.get_ref())
-    .await
-    {
-        Ok(l) => l,
-        Err(e) => {
-            log::warn!("DB query failed: {e}");
-            return render_error(
-                &tmpl,
-                base,
-                "数据库查询失败",
-                actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
-            );
-        }
-    };
+    let logs = db_try!(
+        sqlx::query_as::<_, ExtractLog>(
+            "SELECT * FROM qr_extract_logs WHERE qrcode_id = ? ORDER BY extracted_at DESC LIMIT ? OFFSET ?",
+        )
+        .bind(record.id)
+        .bind(PAGE_SIZE)
+        .bind(offset)
+        .fetch_all(pool.get_ref())
+        .await,
+        &tmpl,
+        base
+    );
 
-    let total_pages = (total + PAGE_SIZE - 1) / PAGE_SIZE;
+    let total_pages = calc_total_pages(total);
     let display_text = truncate_display(&record.text_content);
 
     let mut ctx = Context::new();

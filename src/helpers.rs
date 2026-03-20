@@ -5,18 +5,80 @@ pub const PAGE_SIZE: i64 = 20;
 pub const MAX_CONTENT_LENGTH: usize = 5000;
 pub const MAX_COUNT_UPPER: u32 = 10000;
 
+/// DB error → HTML error page. Use in admin handlers.
+/// Usage: `let val = db_try!(query.await, &tmpl, base);`
+#[macro_export]
+macro_rules! db_try {
+    ($expr:expr, $tmpl:expr, $base:expr) => {
+        match $expr {
+            Ok(v) => v,
+            Err(e) => {
+                log::warn!("DB query failed: {e}");
+                return $crate::helpers::render_error(
+                    $tmpl,
+                    $base,
+                    "数据库查询失败",
+                    actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
+                );
+            }
+        }
+    };
+}
+
+/// DB fetch_optional → HTML error page, with 404 on None.
+/// Usage: `let record = db_try_optional!(query.await, &tmpl, base, "二维码不存在");`
+#[macro_export]
+macro_rules! db_try_optional {
+    ($expr:expr, $tmpl:expr, $base:expr, $not_found_msg:expr) => {
+        match $expr {
+            Ok(Some(v)) => v,
+            Ok(None) => {
+                return $crate::helpers::render_error(
+                    $tmpl,
+                    $base,
+                    $not_found_msg,
+                    actix_web::http::StatusCode::NOT_FOUND,
+                );
+            }
+            Err(e) => {
+                log::warn!("DB query failed: {e}");
+                return $crate::helpers::render_error(
+                    $tmpl,
+                    $base,
+                    "数据库查询失败",
+                    actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
+                );
+            }
+        }
+    };
+}
+
+/// Calculate page number and offset from optional page parameter.
+pub fn calc_page_offset(page: Option<i64>) -> (i64, i64) {
+    let page = page.unwrap_or(1).clamp(1, 100_000);
+    let offset = (page - 1) * PAGE_SIZE;
+    (page, offset)
+}
+
+/// Calculate total pages from total record count.
+pub fn calc_total_pages(total: i64) -> i64 {
+    (total + PAGE_SIZE - 1) / PAGE_SIZE
+}
+
 /// Generate HMAC-SHA256 hash (first 8 bytes = 16 hex chars)
 pub fn generate_extract_hash(uuid: &str, salt: &str) -> String {
     use hmac::{Hmac, Mac};
     use sha2::Sha256;
+    use std::fmt::Write;
 
     let mut mac = Hmac::<Sha256>::new_from_slice(salt.as_bytes()).unwrap();
     mac.update(uuid.as_bytes());
     let result = mac.finalize().into_bytes();
-    result[..8]
-        .iter()
-        .map(|b| format!("{:02x}", b))
-        .collect::<String>()
+    let mut hex = String::with_capacity(16);
+    for b in &result[..8] {
+        let _ = write!(hex, "{:02x}", b);
+    }
+    hex
 }
 
 /// Verify extract hash with constant-time comparison and optional legacy (8-char) support
@@ -179,6 +241,18 @@ mod tests {
     }
 
     #[test]
+    fn test_verify_extract_hash_wrong_length() {
+        assert!(!verify_extract_hash("test-uuid", "abc", "salt", true));
+        assert!(!verify_extract_hash("test-uuid", "", "salt", true));
+        assert!(!verify_extract_hash(
+            "test-uuid",
+            "0000000000000000000000",
+            "salt",
+            true
+        ));
+    }
+
+    #[test]
     fn test_parse_segments_json_array() {
         let result = parse_segments(r#"["a","b","c"]"#);
         assert_eq!(result, vec!["a", "b", "c"]);
@@ -237,6 +311,12 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_segments_exactly_at_limit() {
+        let exact = "x".repeat(5000);
+        assert!(validate_segments(&exact).is_ok());
+    }
+
+    #[test]
     fn test_validate_segments_plain_string_fallback() {
         let (segs, _) = validate_segments("plain text").unwrap();
         assert_eq!(segs, vec!["plain text"]);
@@ -252,5 +332,37 @@ mod tests {
     fn test_validate_segments_filters_empty() {
         let (segs, _) = validate_segments(r#"["hello", "", " ", "world"]"#).unwrap();
         assert_eq!(segs, vec!["hello", "world"]);
+    }
+
+    #[test]
+    fn test_calc_page_offset_defaults() {
+        let (page, offset) = calc_page_offset(None);
+        assert_eq!(page, 1);
+        assert_eq!(offset, 0);
+    }
+
+    #[test]
+    fn test_calc_page_offset_page_2() {
+        let (page, offset) = calc_page_offset(Some(2));
+        assert_eq!(page, 2);
+        assert_eq!(offset, 20);
+    }
+
+    #[test]
+    fn test_calc_page_offset_clamps() {
+        let (page, _) = calc_page_offset(Some(0));
+        assert_eq!(page, 1);
+        let (page, _) = calc_page_offset(Some(-5));
+        assert_eq!(page, 1);
+    }
+
+    #[test]
+    fn test_calc_total_pages() {
+        assert_eq!(calc_total_pages(0), 0);
+        assert_eq!(calc_total_pages(1), 1);
+        assert_eq!(calc_total_pages(20), 1);
+        assert_eq!(calc_total_pages(21), 2);
+        assert_eq!(calc_total_pages(40), 2);
+        assert_eq!(calc_total_pages(41), 3);
     }
 }

@@ -5,6 +5,7 @@ use tera::{Context, Tera};
 use crate::config::Config;
 use crate::helpers::*;
 use crate::models::*;
+use crate::db_try;
 
 /// Extract landing page (GET): validates HMAC and UUID, renders skeleton for AJAX
 pub async fn extract_page(
@@ -27,22 +28,14 @@ pub async fn extract_page(
         );
     }
 
-    let exists: Option<u64> = match sqlx::query_scalar("SELECT id FROM qr_codes WHERE uuid = ?")
-        .bind(&uuid)
-        .fetch_optional(pool.get_ref())
-        .await
-    {
-        Ok(v) => v,
-        Err(e) => {
-            log::warn!("DB query failed: {e}");
-            return render_error(
-                &tmpl,
-                base,
-                "数据库查询失败",
-                actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
-            );
-        }
-    };
+    let exists: Option<u64> = db_try!(
+        sqlx::query_scalar("SELECT id FROM qr_codes WHERE uuid = ?")
+            .bind(&uuid)
+            .fetch_optional(pool.get_ref())
+            .await,
+        &tmpl,
+        base
+    );
 
     if exists.is_none() {
         return render_error(
