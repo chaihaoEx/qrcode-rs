@@ -84,6 +84,7 @@ pub async fn login_handler(
             .finish();
     }
 
+    // 1. Try config-file super admin first
     if form.username == config.admin.username
         && bcrypt::verify(&form.password, &config.admin.password_hash).unwrap_or(false)
     {
@@ -91,16 +92,42 @@ pub async fn login_handler(
             log::warn!("Session insert failed: error={e}");
             return HttpResponse::InternalServerError().body("Session error");
         }
+        let _ = session.insert("role", "super");
         rate_limiter.reset(&client_ip);
-        services::audit::log_action(pool.get_ref(), &form.username, "login_success", None, None, &client_ip).await;
-        HttpResponse::Found()
+        services::audit::log_action(pool.get_ref(), &form.username, "login_success", None, Some("role=super"), &client_ip).await;
+        return HttpResponse::Found()
             .insert_header(("Location", format!("{base}/")))
-            .finish()
-    } else {
-        services::audit::log_action(pool.get_ref(), &form.username, "login_failed", None, None, &client_ip).await;
-        HttpResponse::Found()
-            .insert_header(("Location", format!("{base}/login?error=1")))
-            .finish()
+            .finish();
+    }
+
+    // 2. Try database admin users
+    match services::user::verify_db_user(pool.get_ref(), &form.username, &form.password).await {
+        Ok(Some(username)) => {
+            if let Err(e) = session.insert("user", &username) {
+                log::warn!("Session insert failed: error={e}");
+                return HttpResponse::InternalServerError().body("Session error");
+            }
+            let _ = session.insert("role", "admin");
+            rate_limiter.reset(&client_ip);
+            services::audit::log_action(pool.get_ref(), &username, "login_success", None, Some("role=admin"), &client_ip).await;
+            HttpResponse::Found()
+                .insert_header(("Location", format!("{base}/")))
+                .finish()
+        }
+        Ok(None) => {
+            // User not found in either config or DB
+            services::audit::log_action(pool.get_ref(), &form.username, "login_failed", None, None, &client_ip).await;
+            HttpResponse::Found()
+                .insert_header(("Location", format!("{base}/login?error=1")))
+                .finish()
+        }
+        Err(msg) => {
+            // Account locked/disabled
+            services::audit::log_action(pool.get_ref(), &form.username, "login_failed", None, Some(&msg), &client_ip).await;
+            HttpResponse::Found()
+                .insert_header(("Location", format!("{base}/login?error=1")))
+                .finish()
+        }
     }
 }
 

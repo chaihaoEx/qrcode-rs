@@ -61,3 +61,24 @@ pub struct AiCreateForm {
     pub max_count: Option<u32>,
     pub csrf_token: String,
 }
+
+#[derive(Deserialize)]
+pub struct CreateUserForm {
+    pub username: String,
+    pub password: String,
+    pub csrf_token: String,
+}
+
+#[derive(Deserialize)]
+pub struct ToggleUserForm {
+    pub id: u32,
+    pub is_active: bool,
+    pub csrf_token: String,
+}
+
+#[derive(Deserialize)]
+pub struct ChangePasswordForm {
+    pub old_password: String,
+    pub new_password: String,
+    pub csrf_token: String,
+}

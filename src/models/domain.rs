@@ -61,6 +61,22 @@ pub struct AuditLog {
 }
 
 #[derive(sqlx::FromRow, Serialize)]
+pub struct AdminUser {
+    pub id: u32,
+    pub username: String,
+    #[serde(skip_serializing)]
+    pub password_hash: String,
+    pub is_active: bool,
+    #[serde(serialize_with = "option_datetime_format::serialize")]
+    pub locked_until: Option<NaiveDateTime>,
+    pub failed_attempts: u32,
+    #[serde(serialize_with = "datetime_format::serialize")]
+    pub created_at: NaiveDateTime,
+    #[serde(serialize_with = "datetime_format::serialize")]
+    pub updated_at: NaiveDateTime,
+}
+
+#[derive(sqlx::FromRow, Serialize)]
 pub struct ExtractLog {
     pub id: u64,
     pub qrcode_id: u64,
