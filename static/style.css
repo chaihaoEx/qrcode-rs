@@ -733,56 +733,6 @@ a:hover { color: var(--primary-dark); }
 
 .extract-header-success h1 { color: var(--success); }
 
-/* ---- Meta Info ---- */
-
-.extract-meta {
-    background: var(--gray-50);
-    border-radius: var(--radius);
-    padding: 4px 0;
-    margin-bottom: 24px;
-}
-
-.meta-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 10px 16px;
-}
-
-.meta-row + .meta-row {
-    border-top: 1px solid var(--gray-100);
-}
-
-.meta-label {
-    font-size: 13px;
-    color: var(--gray-500);
-}
-
-.meta-value {
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--gray-800);
-}
-
-.remaining-badge {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 28px;
-    height: 28px;
-    padding: 0 10px;
-    background: var(--primary-bg);
-    color: var(--primary);
-    font-weight: 700;
-    font-size: 14px;
-    border-radius: 999px;
-}
-
-.remaining-zero {
-    background: var(--danger-bg);
-    color: var(--danger);
-}
-
 /* ---- Extract Button ---- */
 
 .btn-extract {
