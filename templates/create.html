@@ -26,6 +26,7 @@
 
     <div class="admin-card">
         <form method="POST" action="{{ base }}/create" class="form-create" id="createForm">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <div class="field">
                 <label>文字内容 <span class="required">*</span></label>
                 <div id="segments">

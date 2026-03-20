@@ -4,6 +4,8 @@ use serde::Deserialize;
 use tera::{Context, Tera};
 
 use crate::config::Config;
+use crate::csrf;
+use crate::rate_limit::RateLimiter;
 
 fn get_client_ip(req: &HttpRequest) -> String {
     req.connection_info()
@@ -16,6 +18,7 @@ fn get_client_ip(req: &HttpRequest) -> String {
 pub struct LoginForm {
     pub username: String,
     pub password: String,
+    pub csrf_token: String,
 }
 
 pub async fn login_page(
@@ -32,11 +35,16 @@ pub async fn login_page(
             .finish();
     }
 
+    let csrf_token = csrf::ensure_csrf_token(&session);
+
     let mut ctx = Context::new();
     ctx.insert("base", base);
+    ctx.insert("csrf_token", &csrf_token);
     let query = req.query_string();
     if query.contains("error=1") {
         ctx.insert("error", &"用户名或密码错误");
+    } else if query.contains("error=rate") {
+        ctx.insert("error", &"登录尝试过于频繁，请稍后再试");
     }
 
     match tmpl.render("login.html", &ctx) {
@@ -53,9 +61,23 @@ pub async fn login_handler(
     session: Session,
     config: web::Data<Config>,
     req: HttpRequest,
+    rate_limiter: web::Data<RateLimiter>,
 ) -> HttpResponse {
     let base = &config.server.context_path;
     let client_ip = get_client_ip(&req);
+
+    if !csrf::validate_csrf_token(&session, &form.csrf_token) {
+        return HttpResponse::Found()
+            .insert_header(("Location", format!("{base}/login?error=1")))
+            .finish();
+    }
+
+    if !rate_limiter.check_and_increment(&client_ip) {
+        log::warn!("Login rate limited: ip={client_ip}");
+        return HttpResponse::Found()
+            .insert_header(("Location", format!("{base}/login?error=rate")))
+            .finish();
+    }
 
     if form.username == config.admin.username
         && bcrypt::verify(&form.password, &config.admin.password_hash).unwrap_or(false)
@@ -64,6 +86,7 @@ pub async fn login_handler(
             log::warn!("Session insert failed: error={e}");
             return HttpResponse::InternalServerError().body("Session error");
         }
+        rate_limiter.reset(&client_ip);
         log::info!("Login success: user={}, ip={client_ip}", form.username);
         HttpResponse::Found()
             .insert_header(("Location", format!("{base}/")))
@@ -78,7 +101,10 @@ pub async fn login_handler(
 
 pub async fn logout(session: Session, config: web::Data<Config>) -> HttpResponse {
     let base = &config.server.context_path;
-    let username = session.get::<String>("user").unwrap_or(None).unwrap_or_default();
+    let username = session
+        .get::<String>("user")
+        .unwrap_or(None)
+        .unwrap_or_default();
     log::info!("Logout: user={username}");
     session.purge();
     HttpResponse::Found()

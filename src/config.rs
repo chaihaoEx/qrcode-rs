@@ -23,6 +23,9 @@ pub struct ServerConfig {
     pub tls_cert: Option<String>,
     #[serde(default)]
     pub tls_key: Option<String>,
+    /// Whether to accept legacy 8-char HMAC hashes (default: true for backward compatibility)
+    #[serde(default)]
+    pub legacy_hash_support: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -34,6 +37,12 @@ pub struct AdminConfig {
 #[derive(Debug, Deserialize, Clone)]
 pub struct DatabaseConfig {
     pub url: String,
+    #[serde(default = "default_max_connections")]
+    pub max_connections: u32,
+}
+
+fn default_max_connections() -> u32 {
+    10
 }
 
 impl Config {
