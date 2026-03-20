@@ -1,0 +1,240 @@
+{% extends "base.html" %}
+
+{% block title %}AI 生成评论 - QRCode-RS{% endblock %}
+{% block body_class %}body-admin{% endblock %}
+{% block layout_class %}page-admin{% endblock %}
+
+{% block content %}
+<nav class="topbar">
+    <div class="topbar-inner">
+        <div class="topbar-brand">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="3" height="3"/><line x1="21" y1="14" x2="21" y2="17"/><line x1="14" y1="21" x2="17" y2="21"/>
+            </svg>
+            <span>QRCode-RS</span>
+        </div>
+        <div class="topbar-actions">
+            <a href="{{ base }}/" class="btn btn-ghost btn-sm">&larr; 返回列表</a>
+        </div>
+    </div>
+</nav>
+
+<main class="admin-main fade-in">
+    <div class="admin-header">
+        <h1>AI 生成评论</h1>
+    </div>
+
+    <!-- 输入表单 -->
+    <div class="admin-card" id="inputSection">
+        <div class="form-create">
+            <div class="field">
+                <label>主题 / 原始信息 <span class="required">*</span></label>
+                <textarea id="topic" rows="4" placeholder="输入帖子主题或需要评论的原始内容..."></textarea>
+            </div>
+            <div class="field">
+                <label for="count">生成数量</label>
+                <input type="number" id="count" value="10" min="1" max="50">
+                <p class="field-hint">每次最多生成 50 条</p>
+            </div>
+            <div class="field">
+                <label for="style">风格 / 语气要求</label>
+                <input type="text" id="style" placeholder="如：口语化、带emoji、正式、调侃等">
+            </div>
+            <div class="field">
+                <label>参考示例</label>
+                <textarea id="examples" rows="3" placeholder="输入 1-2 条示例评论，AI 会模仿风格生成"></textarea>
+            </div>
+            <div class="form-actions">
+                <a href="{{ base }}/" class="btn btn-ghost">取消</a>
+                <button type="button" id="generateBtn" class="btn btn-primary" onclick="doGenerate()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a4 4 0 014 4c0 1.95-2 3-2 8h-4c0-5-2-6.05-2-8a4 4 0 014-4z"/><line x1="10" y1="22" x2="14" y2="22"/><line x1="9" y1="18" x2="15" y2="18"/></svg>
+                    AI 生成
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 加载状态 -->
+    <div class="admin-card" id="loadingSection" style="display:none">
+        <div style="text-align:center; padding:48px 20px; color:var(--gray-400);">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation:spin 1s linear infinite; display:block; margin:0 auto 16px;">
+                <path d="M21 12a9 9 0 11-6.219-8.56"/>
+            </svg>
+            <p style="font-size:15px;">AI 正在生成评论...</p>
+        </div>
+    </div>
+
+    <!-- 结果区域 -->
+    <div class="admin-card" id="resultSection" style="display:none">
+        <div class="form-create">
+            <div class="field">
+                <label>生成结果 (<span id="commentCount">0</span> 条)</label>
+                <div id="commentList"></div>
+                <div style="display:flex; gap:8px; margin-top:12px;">
+                    <button type="button" class="btn btn-outline btn-sm" onclick="doAppend()">+ 追加生成</button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="doReset()">重新开始</button>
+                </div>
+            </div>
+            <div class="field">
+                <label for="remark">备注</label>
+                <input type="text" id="remark" name="remark" placeholder="选填，方便后续查找">
+            </div>
+            <div class="field">
+                <label for="max_count">最大提取次数</label>
+                <input type="number" id="max_count" name="max_count" min="1">
+                <p class="field-hint">默认等于评论条数，每人领取一条不重复的评论</p>
+            </div>
+            <div class="form-actions">
+                <a href="{{ base }}/" class="btn btn-ghost">取消</a>
+                <button type="button" class="btn btn-primary" onclick="doCreate()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                    确认创建二维码
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 错误提示 -->
+    <div class="admin-card" id="errorSection" style="display:none">
+        <div style="text-align:center; padding:32px 20px;">
+            <p style="color:var(--danger); font-size:15px;" id="errorMessage"></p>
+            <button type="button" class="btn btn-outline" style="margin-top:16px;" onclick="showInput()">返回重试</button>
+        </div>
+    </div>
+</main>
+
+<style>
+@keyframes spin { to { transform: rotate(360deg); } }
+.comment-item { position:relative; margin-bottom:8px; }
+.comment-item textarea { width:100%; padding:10px 36px 10px 12px; font-family:var(--font-body); font-size:14px; line-height:1.5; color:var(--gray-800); background:#fff; border:1px solid var(--gray-200); border-radius:6px; resize:vertical; min-height:44px; }
+.comment-item textarea:focus { outline:none; border-color:var(--primary); box-shadow:0 0 0 3px rgba(13,148,136,0.1); }
+.comment-remove { position:absolute; top:8px; right:8px; width:24px; height:24px; display:flex; align-items:center; justify-content:center; border-radius:50%; background:var(--gray-100); color:var(--gray-400); border:none; cursor:pointer; font-size:14px; line-height:1; }
+.comment-remove:hover { background:var(--danger-bg); color:var(--danger); }
+</style>
+
+<script>
+(function(){
+    var BASE = '{{ base | safe }}';
+    var CSRF = '{{ csrf_token | safe }}';
+    var comments = [];
+
+    window.showInput = function() {
+        document.getElementById('inputSection').style.display = '';
+        document.getElementById('loadingSection').style.display = 'none';
+        document.getElementById('resultSection').style.display = 'none';
+        document.getElementById('errorSection').style.display = 'none';
+    };
+
+    function showLoading() {
+        document.getElementById('inputSection').style.display = 'none';
+        document.getElementById('loadingSection').style.display = '';
+        document.getElementById('resultSection').style.display = 'none';
+        document.getElementById('errorSection').style.display = 'none';
+    }
+
+    function showResult() {
+        document.getElementById('inputSection').style.display = 'none';
+        document.getElementById('loadingSection').style.display = 'none';
+        document.getElementById('resultSection').style.display = '';
+        document.getElementById('errorSection').style.display = 'none';
+        renderComments();
+    }
+
+    function showError(msg) {
+        document.getElementById('inputSection').style.display = 'none';
+        document.getElementById('loadingSection').style.display = 'none';
+        document.getElementById('resultSection').style.display = 'none';
+        document.getElementById('errorSection').style.display = '';
+        document.getElementById('errorMessage').textContent = msg;
+    }
+
+    function renderComments() {
+        var list = document.getElementById('commentList');
+        list.innerHTML = '';
+        comments.forEach(function(c, i) {
+            var div = document.createElement('div');
+            div.className = 'comment-item';
+            var ta = document.createElement('textarea');
+            ta.rows = 2;
+            ta.value = c;
+            ta.dataset.index = i;
+            ta.addEventListener('input', function() { comments[this.dataset.index] = this.value; });
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'comment-remove';
+            btn.innerHTML = '&times;';
+            btn.dataset.index = i;
+            btn.addEventListener('click', function() {
+                comments.splice(this.dataset.index, 1);
+                renderComments();
+            });
+            div.appendChild(ta);
+            div.appendChild(btn);
+            list.appendChild(div);
+        });
+        document.getElementById('commentCount').textContent = comments.length;
+        document.getElementById('max_count').value = comments.length;
+    }
+
+    function callAI(append) {
+        var topic = document.getElementById('topic').value.trim();
+        if (!topic) { alert('请输入主题信息'); return; }
+        showLoading();
+        fetch(BASE + '/ai-generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                topic: topic,
+                count: parseInt(document.getElementById('count').value) || 10,
+                style: document.getElementById('style').value.trim() || null,
+                examples: document.getElementById('examples').value.trim() || null,
+                csrf_token: CSRF
+            })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.status === 'ok' && data.comments) {
+                if (append) {
+                    comments = comments.concat(data.comments);
+                } else {
+                    comments = data.comments;
+                }
+                showResult();
+            } else {
+                showError(data.message || 'AI 生成失败');
+            }
+        })
+        .catch(function(e) {
+            showError('请求失败: ' + e.message);
+        });
+    }
+
+    window.doGenerate = function() { callAI(false); };
+    window.doAppend = function() { callAI(true); };
+    window.doReset = function() { comments = []; showInput(); };
+
+    window.doCreate = function() {
+        var valid = comments.filter(function(c) { return c.trim(); });
+        if (valid.length === 0) { alert('至少需要一条评论'); return; }
+        var form = document.createElement('form');
+        form.method = 'POST';
+        form.action = BASE + '/ai-generate/create';
+
+        function addField(name, value) {
+            var input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = name;
+            input.value = value;
+            form.appendChild(input);
+        }
+
+        addField('comments', JSON.stringify(valid));
+        addField('remark', document.getElementById('remark').value);
+        addField('max_count', document.getElementById('max_count').value);
+        addField('csrf_token', CSRF);
+        document.body.appendChild(form);
+        form.submit();
+    };
+})();
+</script>
+{% endblock %}

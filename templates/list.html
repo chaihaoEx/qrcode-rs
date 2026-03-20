@@ -23,10 +23,18 @@
 <main class="admin-main fade-in" data-csrf="{{ csrf_token }}">
     <div class="admin-header">
         <h1>二维码管理</h1>
-        <a href="{{ base }}/create" class="btn btn-primary">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            创建二维码
-        </a>
+        <div style="display:flex; gap:8px;">
+            {% if ai_enabled %}
+            <a href="{{ base }}/ai-generate" class="btn btn-outline">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a4 4 0 014 4c0 1.95-2 3-2 8h-4c0-5-2-6.05-2-8a4 4 0 014-4z"/><line x1="10" y1="22" x2="14" y2="22"/><line x1="9" y1="18" x2="15" y2="18"/></svg>
+                AI 生成
+            </a>
+            {% endif %}
+            <a href="{{ base }}/create" class="btn btn-primary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                创建二维码
+            </a>
+        </div>
     </div>
 
     <div class="admin-card">
