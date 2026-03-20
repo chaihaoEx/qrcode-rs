@@ -21,6 +21,17 @@ fn get_session_username(session: &Session) -> String {
         .unwrap_or_default()
 }
 
+fn get_session_role(session: &Session) -> String {
+    session
+        .get::<String>("role")
+        .unwrap_or(None)
+        .unwrap_or_else(|| "admin".to_string())
+}
+
+fn is_super_admin(session: &Session) -> bool {
+    get_session_role(session) == "super"
+}
+
 pub async fn list_page(
     tmpl: web::Data<Tera>,
     pool: web::Data<MySqlPool>,
@@ -68,6 +79,7 @@ pub async fn list_page(
     ctx.insert("page", &page);
     ctx.insert("total_pages", &total_pages);
     ctx.insert("keyword", &keyword);
+    ctx.insert("role", &get_session_role(&session));
     ctx.insert("ai_enabled", &config.ai.is_some());
     ctx.insert("active_nav", "qrcode");
 
@@ -87,6 +99,7 @@ pub async fn create_page(
     ctx.insert("base", base);
     ctx.insert("username", &username);
     ctx.insert("csrf_token", &csrf_token);
+    ctx.insert("role", &get_session_role(&session));
     ctx.insert("ai_enabled", &config.ai.is_some());
     ctx.insert("active_nav", "qrcode");
 
@@ -146,6 +159,7 @@ pub async fn create_handler(
 
 pub async fn download_image(
     path: web::Path<String>,
+    pool: web::Data<MySqlPool>,
     config: web::Data<Config>,
 ) -> HttpResponse {
     let uuid = path.into_inner();
@@ -162,7 +176,13 @@ pub async fn download_image(
         config.server.public_host, config.server.context_path
     );
 
-    match services::qrcode::generate_qr_image(&url) {
+    // Fetch remark from DB
+    let remark = match services::qrcode::get_by_uuid(pool.get_ref(), &safe_uuid).await {
+        Ok(Some(record)) => record.remark,
+        _ => None,
+    };
+
+    match services::qrcode::generate_qr_image(&url, remark.as_deref()) {
         Ok(png_data) => HttpResponse::Ok()
             .content_type("image/png")
             .insert_header((
@@ -279,6 +299,7 @@ pub async fn edit_page(
     ctx.insert("csrf_token", &csrf_token);
     ctx.insert("record", &record);
     ctx.insert("segments", &segments);
+    ctx.insert("role", &get_session_role(&session));
     ctx.insert("ai_enabled", &config.ai.is_some());
     ctx.insert("active_nav", "qrcode");
 
@@ -379,6 +400,7 @@ pub async fn extract_logs_page(
     ctx.insert("total_pages", &total_pages);
     ctx.insert("list_page", &list_page);
     ctx.insert("list_keyword", &list_keyword);
+    ctx.insert("role", &get_session_role(&session));
     ctx.insert("ai_enabled", &config.ai.is_some());
     ctx.insert("active_nav", "qrcode");
 
@@ -410,6 +432,7 @@ pub async fn ai_generate_page(
     ctx.insert("base", base);
     ctx.insert("username", &username);
     ctx.insert("csrf_token", &csrf_token);
+    ctx.insert("role", &get_session_role(&session));
     ctx.insert("ai_enabled", &true);
     ctx.insert("active_nav", "ai");
 
@@ -520,6 +543,16 @@ pub async fn audit_logs_page(
     query: web::Query<AuditLogsQuery>,
 ) -> HttpResponse {
     let base = &config.server.context_path;
+
+    if !is_super_admin(&session) {
+        return render_error(
+            &tmpl,
+            base,
+            "权限不足，仅超级管理员可访问",
+            actix_web::http::StatusCode::FORBIDDEN,
+        );
+    }
+
     let username = get_session_username(&session);
     let action_filter = query.action.clone().unwrap_or_default();
     let keyword = query.keyword.clone().unwrap_or_default();
@@ -536,6 +569,7 @@ pub async fn audit_logs_page(
     let mut ctx = Context::new();
     ctx.insert("base", base);
     ctx.insert("username", &username);
+    ctx.insert("role", &get_session_role(&session));
     ctx.insert("logs", &logs);
     ctx.insert("page", &page);
     ctx.insert("total_pages", &total_pages);
@@ -545,4 +579,217 @@ pub async fn audit_logs_page(
     ctx.insert("active_nav", "audit");
 
     render_template(&tmpl, "audit_logs.html", &ctx)
+}
+
+// ---- 用户管理 (super admin only) ----
+
+pub async fn users_page(
+    tmpl: web::Data<Tera>,
+    pool: web::Data<MySqlPool>,
+    session: Session,
+    config: web::Data<Config>,
+) -> HttpResponse {
+    let base = &config.server.context_path;
+
+    if !is_super_admin(&session) {
+        return render_error(
+            &tmpl,
+            base,
+            "权限不足，仅超级管理员可访问",
+            actix_web::http::StatusCode::FORBIDDEN,
+        );
+    }
+
+    let username = get_session_username(&session);
+    let csrf_token = csrf::ensure_csrf_token(&session);
+
+    let users = db_try!(
+        services::user::list_users(pool.get_ref()).await,
+        &tmpl,
+        base
+    );
+
+    let mut ctx = Context::new();
+    ctx.insert("base", base);
+    ctx.insert("username", &username);
+    ctx.insert("role", &get_session_role(&session));
+    ctx.insert("csrf_token", &csrf_token);
+    ctx.insert("users", &users);
+    ctx.insert("ai_enabled", &config.ai.is_some());
+    ctx.insert("active_nav", "users");
+
+    render_template(&tmpl, "users.html", &ctx)
+}
+
+pub async fn create_user_handler(
+    form: web::Form<CreateUserForm>,
+    tmpl: web::Data<Tera>,
+    pool: web::Data<MySqlPool>,
+    session: Session,
+    config: web::Data<Config>,
+    req: HttpRequest,
+) -> HttpResponse {
+    let base = &config.server.context_path;
+
+    if !is_super_admin(&session) {
+        return render_error(
+            &tmpl,
+            base,
+            "权限不足",
+            actix_web::http::StatusCode::FORBIDDEN,
+        );
+    }
+
+    if !csrf::validate_csrf_token(&session, &form.csrf_token) {
+        return render_error(
+            &tmpl,
+            base,
+            "CSRF 校验失败，请刷新页面重试",
+            actix_web::http::StatusCode::FORBIDDEN,
+        );
+    }
+
+    let username = get_session_username(&session);
+    let client_ip = get_client_ip(&req);
+
+    if let Err(msg) = services::user::create_user(pool.get_ref(), &form.username, &form.password).await {
+        return render_error(&tmpl, base, &msg, actix_web::http::StatusCode::BAD_REQUEST);
+    }
+
+    let detail = format!("new_user={}", form.username.trim());
+    services::audit::log_action(pool.get_ref(), &username, "create_user", None, Some(&detail), &client_ip).await;
+
+    HttpResponse::Found()
+        .insert_header(("Location", format!("{base}/users")))
+        .finish()
+}
+
+pub async fn toggle_user_handler(
+    form: web::Form<ToggleUserForm>,
+    tmpl: web::Data<Tera>,
+    pool: web::Data<MySqlPool>,
+    session: Session,
+    config: web::Data<Config>,
+    req: HttpRequest,
+) -> HttpResponse {
+    let base = &config.server.context_path;
+
+    if !is_super_admin(&session) {
+        return render_error(
+            &tmpl,
+            base,
+            "权限不足",
+            actix_web::http::StatusCode::FORBIDDEN,
+        );
+    }
+
+    if !csrf::validate_csrf_token(&session, &form.csrf_token) {
+        return render_error(
+            &tmpl,
+            base,
+            "CSRF 校验失败，请刷新页面重试",
+            actix_web::http::StatusCode::FORBIDDEN,
+        );
+    }
+
+    let username = get_session_username(&session);
+    let client_ip = get_client_ip(&req);
+
+    if let Err(e) = services::user::toggle_user(pool.get_ref(), form.id, form.is_active).await {
+        log::warn!("Toggle user failed: {e}");
+        return render_error(
+            &tmpl,
+            base,
+            "操作失败",
+            actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
+        );
+    }
+
+    let detail = format!("user_id={}, is_active={}", form.id, form.is_active);
+    services::audit::log_action(pool.get_ref(), &username, "toggle_user", None, Some(&detail), &client_ip).await;
+
+    HttpResponse::Found()
+        .insert_header(("Location", format!("{base}/users")))
+        .finish()
+}
+
+// ---- 修改密码 (admin users only) ----
+
+pub async fn change_password_page(
+    tmpl: web::Data<Tera>,
+    session: Session,
+    config: web::Data<Config>,
+) -> HttpResponse {
+    let base = &config.server.context_path;
+    let role = get_session_role(&session);
+
+    // Only DB admins can change password (super admin uses config file)
+    if role != "admin" {
+        return render_error(
+            &tmpl,
+            base,
+            "超级管理员的密码请在配置文件中修改",
+            actix_web::http::StatusCode::FORBIDDEN,
+        );
+    }
+
+    let username = get_session_username(&session);
+    let csrf_token = csrf::ensure_csrf_token(&session);
+
+    let mut ctx = Context::new();
+    ctx.insert("base", base);
+    ctx.insert("username", &username);
+    ctx.insert("role", &role);
+    ctx.insert("csrf_token", &csrf_token);
+    ctx.insert("ai_enabled", &config.ai.is_some());
+    ctx.insert("active_nav", "password");
+
+    render_template(&tmpl, "change_password.html", &ctx)
+}
+
+pub async fn change_password_handler(
+    form: web::Form<ChangePasswordForm>,
+    tmpl: web::Data<Tera>,
+    pool: web::Data<MySqlPool>,
+    session: Session,
+    config: web::Data<Config>,
+    req: HttpRequest,
+) -> HttpResponse {
+    let base = &config.server.context_path;
+    let role = get_session_role(&session);
+
+    if role != "admin" {
+        return render_error(
+            &tmpl,
+            base,
+            "超级管理员的密码请在配置文件中修改",
+            actix_web::http::StatusCode::FORBIDDEN,
+        );
+    }
+
+    if !csrf::validate_csrf_token(&session, &form.csrf_token) {
+        return render_error(
+            &tmpl,
+            base,
+            "CSRF 校验失败，请刷新页面重试",
+            actix_web::http::StatusCode::FORBIDDEN,
+        );
+    }
+
+    let username = get_session_username(&session);
+    let client_ip = get_client_ip(&req);
+
+    match services::user::change_password(pool.get_ref(), &username, &form.old_password, &form.new_password).await {
+        Ok(()) => {
+            services::audit::log_action(pool.get_ref(), &username, "change_password", None, None, &client_ip).await;
+            // Purge session so user must re-login
+            session.purge();
+            HttpResponse::Found()
+                .insert_header(("Location", format!("{base}/login")))
+                .finish()
+        }
+        Err(msg) => {
+            render_error(&tmpl, base, &msg, actix_web::http::StatusCode::BAD_REQUEST)
+        }
+    }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "qrcode-rs"
-version = "1.7.1"
+version = "1.8.0"
 edition = "2021"
 
 [dependencies]
@@ -26,3 +26,5 @@ subtle = "2"
 reqwest = { version = "0.13.2", features = ["json", "rustls"], default-features = false }
 rustls = "0.23"
 rustls-pemfile = "2"
+imageproc = "0.25"
+ab_glyph = "0.2"
