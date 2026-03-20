@@ -18,7 +18,8 @@ CREATE TABLE IF NOT EXISTS qr_codes (
     last_extract_ip VARCHAR(45) NULL,
     last_extract_at DATETIME NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE KEY uk_uuid (uuid)
+    UNIQUE KEY uk_uuid (uuid),
+    INDEX idx_remark (remark)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 提取记录表（追加 browser_id 和 segment_index）

@@ -9,6 +9,8 @@ context_path = ""
 public_host = "http://127.0.0.1:8080"
 # 二维码提取链接的 HMAC 校验盐值
 extract_salt = "CHANGE_ME_use_a_unique_random_salt_value"
+# 是否兼容旧版 8 字符 HMAC 哈希（默认 true，迁移完成后可设为 false）
+# legacy_hash_support = true
 # HTTPS 配置（可选，不配置则仅使用 HTTP）
 # https_port = 8443
 # tls_cert = "/path/to/cert.pem"
@@ -21,3 +23,5 @@ password_hash = "CHANGE_ME_run_cargo_run_hash_password_to_generate"
 
 [database]
 url = "mysql://CHANGE_USER:CHANGE_PASSWORD@localhost:3306/qrcode_db"
+# 数据库连接池最大连接数（默认 10）
+# max_connections = 10
