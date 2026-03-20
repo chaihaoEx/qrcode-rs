@@ -96,3 +96,20 @@ pub struct CreateForm {
 pub struct ActionForm {
     pub csrf_token: String,
 }
+
+#[derive(Deserialize)]
+pub struct AiGenerateRequest {
+    pub topic: String,
+    pub count: Option<u32>,
+    pub style: Option<String>,
+    pub examples: Option<String>,
+    pub csrf_token: String,
+}
+
+#[derive(Deserialize)]
+pub struct AiCreateForm {
+    pub comments: String,
+    pub remark: Option<String>,
+    pub max_count: Option<u32>,
+    pub csrf_token: String,
+}

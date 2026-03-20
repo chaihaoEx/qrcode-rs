@@ -1,3 +1,4 @@
+mod ai;
 mod config;
 mod csrf;
 mod db;
