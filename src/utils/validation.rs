@@ -3,16 +3,15 @@ use actix_web::HttpRequest;
 use super::MAX_CONTENT_LENGTH;
 
 /// Extract client IP from request, truncated to max 45 chars (IPv6 max length).
+/// Binds `ConnectionInfo` to a local variable so the `&str` borrow remains valid,
+/// then slices before allocating to avoid CodeQL "uncontrolled allocation" warnings.
 pub fn get_client_ip(req: &HttpRequest) -> String {
-    let raw = req
-        .connection_info()
-        .realip_remote_addr()
-        .unwrap_or("unknown")
-        .to_string();
+    let info = req.connection_info();
+    let raw = info.realip_remote_addr().unwrap_or("unknown");
     if raw.len() > 45 {
         raw[..45].to_string()
     } else {
-        raw
+        raw.to_string()
     }
 }
 
