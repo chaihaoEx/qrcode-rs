@@ -996,6 +996,7 @@ a:hover { color: var(--primary-dark); }
 
     .audit-filter { flex-direction: column; gap: 8px; }
     .filter-select { width: 100%; }
+    .audit-filter .search-bar { width: 100%; }
 
     .admin-header {
         flex-direction: column;
