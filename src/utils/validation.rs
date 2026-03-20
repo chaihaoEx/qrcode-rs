@@ -1,4 +1,20 @@
+use actix_web::HttpRequest;
+
 use super::MAX_CONTENT_LENGTH;
+
+/// Extract client IP from request, truncated to max 45 chars (IPv6 max length).
+pub fn get_client_ip(req: &HttpRequest) -> String {
+    let raw = req
+        .connection_info()
+        .realip_remote_addr()
+        .unwrap_or("unknown")
+        .to_string();
+    if raw.len() > 45 {
+        raw[..45].to_string()
+    } else {
+        raw
+    }
+}
 
 /// Parse text_content into segments. Falls back to single segment if not JSON array.
 pub fn parse_segments(text_content: &str) -> Vec<String> {

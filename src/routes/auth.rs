@@ -7,13 +7,7 @@ use crate::config::Config;
 use crate::csrf;
 use crate::rate_limit::RateLimiter;
 use crate::services;
-
-fn get_client_ip(req: &HttpRequest) -> String {
-    req.connection_info()
-        .realip_remote_addr()
-        .unwrap_or("unknown")
-        .to_string()
-}
+use crate::utils::validation::get_client_ip;
 
 const MAX_USERNAME_LEN: usize = 100;
 const MAX_PASSWORD_LEN: usize = 200;

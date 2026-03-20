@@ -6,6 +6,7 @@ use crate::config::Config;
 use crate::services;
 use crate::utils::crypto::*;
 use crate::utils::render::*;
+use crate::utils::validation::get_client_ip;
 use crate::db_try;
 
 /// Extract landing page (GET): validates HMAC and UUID, renders skeleton for AJAX
@@ -83,11 +84,7 @@ pub async fn extract_claim_handler(
             .json(serde_json::json!({"status": "error", "message": "invalid browser_id"}));
     }
 
-    let client_ip = req
-        .connection_info()
-        .realip_remote_addr()
-        .unwrap_or("unknown")
-        .to_string();
+    let client_ip = get_client_ip(&req);
 
     match services::extract::claim_slot(pool.get_ref(), &uuid, &browser_id, &client_ip).await {
         Ok(response) => {

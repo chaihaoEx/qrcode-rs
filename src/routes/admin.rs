@@ -14,13 +14,6 @@ use crate::utils::validation::*;
 use crate::utils::MAX_COUNT_UPPER;
 use crate::{db_try, db_try_optional};
 
-fn get_client_ip(req: &HttpRequest) -> String {
-    req.connection_info()
-        .realip_remote_addr()
-        .unwrap_or("unknown")
-        .to_string()
-}
-
 fn get_session_username(session: &Session) -> String {
     session
         .get::<String>("user")
