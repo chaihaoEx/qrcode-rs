@@ -6,6 +6,7 @@ use tera::{Context, Tera};
 use crate::config::Config;
 use crate::csrf;
 use crate::rate_limit::RateLimiter;
+use crate::services;
 
 fn get_client_ip(req: &HttpRequest) -> String {
     req.connection_info()
@@ -65,6 +66,7 @@ pub async fn login_handler(
     config: web::Data<Config>,
     req: HttpRequest,
     rate_limiter: web::Data<RateLimiter>,
+    pool: web::Data<sqlx::MySqlPool>,
 ) -> HttpResponse {
     let base = &config.server.context_path;
     let client_ip = get_client_ip(&req);
@@ -96,25 +98,31 @@ pub async fn login_handler(
             return HttpResponse::InternalServerError().body("Session error");
         }
         rate_limiter.reset(&client_ip);
-        log::info!("Login success");
+        services::audit::log_action(pool.get_ref(), &form.username, "login_success", None, None, &client_ip).await;
         HttpResponse::Found()
             .insert_header(("Location", format!("{base}/")))
             .finish()
     } else {
-        log::warn!("Login failed");
+        services::audit::log_action(pool.get_ref(), &form.username, "login_failed", None, None, &client_ip).await;
         HttpResponse::Found()
             .insert_header(("Location", format!("{base}/login?error=1")))
             .finish()
     }
 }
 
-pub async fn logout(session: Session, config: web::Data<Config>) -> HttpResponse {
+pub async fn logout(
+    session: Session,
+    config: web::Data<Config>,
+    pool: web::Data<sqlx::MySqlPool>,
+    req: HttpRequest,
+) -> HttpResponse {
     let base = &config.server.context_path;
-    let _username = session
+    let username = session
         .get::<String>("user")
         .unwrap_or(None)
         .unwrap_or_default();
-    log::info!("Logout");
+    let client_ip = get_client_ip(&req);
+    services::audit::log_action(pool.get_ref(), &username, "logout", None, None, &client_ip).await;
     session.purge();
     HttpResponse::Found()
         .insert_header(("Location", format!("{base}/login")))

@@ -1,5 +1,5 @@
 use actix_session::Session;
-use actix_web::{web, HttpResponse};
+use actix_web::{web, HttpRequest, HttpResponse};
 use sqlx::MySqlPool;
 use tera::{Context, Tera};
 
@@ -14,6 +14,20 @@ use crate::utils::validation::*;
 use crate::utils::MAX_COUNT_UPPER;
 use crate::{db_try, db_try_optional};
 
+fn get_client_ip(req: &HttpRequest) -> String {
+    req.connection_info()
+        .realip_remote_addr()
+        .unwrap_or("unknown")
+        .to_string()
+}
+
+fn get_session_username(session: &Session) -> String {
+    session
+        .get::<String>("user")
+        .unwrap_or(None)
+        .unwrap_or_default()
+}
+
 pub async fn list_page(
     tmpl: web::Data<Tera>,
     pool: web::Data<MySqlPool>,
@@ -22,10 +36,7 @@ pub async fn list_page(
     query: web::Query<ListQuery>,
 ) -> HttpResponse {
     let base = &config.server.context_path;
-    let username = session
-        .get::<String>("user")
-        .unwrap_or(None)
-        .unwrap_or_default();
+    let username = get_session_username(&session);
     let csrf_token = csrf::ensure_csrf_token(&session);
     let keyword = query.keyword.clone().unwrap_or_default();
     let (page, offset) = calc_page_offset(query.page);
@@ -65,6 +76,7 @@ pub async fn list_page(
     ctx.insert("total_pages", &total_pages);
     ctx.insert("keyword", &keyword);
     ctx.insert("ai_enabled", &config.ai.is_some());
+    ctx.insert("active_nav", "qrcode");
 
     render_template(&tmpl, "list.html", &ctx)
 }
@@ -75,16 +87,15 @@ pub async fn create_page(
     config: web::Data<Config>,
 ) -> HttpResponse {
     let base = &config.server.context_path;
-    let username = session
-        .get::<String>("user")
-        .unwrap_or(None)
-        .unwrap_or_default();
+    let username = get_session_username(&session);
     let csrf_token = csrf::ensure_csrf_token(&session);
 
     let mut ctx = Context::new();
     ctx.insert("base", base);
     ctx.insert("username", &username);
     ctx.insert("csrf_token", &csrf_token);
+    ctx.insert("ai_enabled", &config.ai.is_some());
+    ctx.insert("active_nav", "qrcode");
 
     render_template(&tmpl, "create.html", &ctx)
 }
@@ -95,8 +106,11 @@ pub async fn create_handler(
     pool: web::Data<MySqlPool>,
     session: Session,
     config: web::Data<Config>,
+    req: HttpRequest,
 ) -> HttpResponse {
     let base = &config.server.context_path;
+    let username = get_session_username(&session);
+    let client_ip = get_client_ip(&req);
 
     if !csrf::validate_csrf_token(&session, &form.csrf_token) {
         return render_error(
@@ -118,17 +132,15 @@ pub async fn create_handler(
     let remark = form.remark.as_deref().filter(|s| !s.trim().is_empty());
 
     match services::qrcode::create(pool.get_ref(), &text_content_json, remark, max_count).await {
-        Ok(_uuid) => {
-            log::info!(
-                "QR code created: max_count={max_count}, segments={}",
-                segments.len()
-            );
+        Ok(uuid) => {
+            let detail = format!("segments={}, max_count={max_count}", segments.len());
+            services::audit::log_action(pool.get_ref(), &username, "create", Some(&uuid), Some(&detail), &client_ip).await;
             HttpResponse::Found()
                 .insert_header(("Location", format!("{base}/")))
                 .finish()
         }
         Err(e) => {
-            log::warn!("QR code insert failed: error={e}");
+            log::warn!("QR code create failed: error={e}");
             render_error(
                 &tmpl,
                 base,
@@ -176,9 +188,12 @@ pub async fn delete_handler(
     pool: web::Data<MySqlPool>,
     session: Session,
     config: web::Data<Config>,
+    req: HttpRequest,
 ) -> HttpResponse {
     let uuid = path.into_inner();
     let base = &config.server.context_path;
+    let username = get_session_username(&session);
+    let client_ip = get_client_ip(&req);
 
     if !csrf::validate_csrf_token(&session, &form.csrf_token) {
         return render_error(
@@ -199,7 +214,7 @@ pub async fn delete_handler(
         );
     }
 
-    log::info!("QR code deleted");
+    services::audit::log_action(pool.get_ref(), &username, "delete", Some(&uuid), None, &client_ip).await;
     HttpResponse::Found()
         .insert_header(("Location", format!("{base}/")))
         .finish()
@@ -212,9 +227,12 @@ pub async fn reset_handler(
     pool: web::Data<MySqlPool>,
     session: Session,
     config: web::Data<Config>,
+    req: HttpRequest,
 ) -> HttpResponse {
     let uuid = path.into_inner();
     let base = &config.server.context_path;
+    let username = get_session_username(&session);
+    let client_ip = get_client_ip(&req);
 
     if !csrf::validate_csrf_token(&session, &form.csrf_token) {
         return render_error(
@@ -235,7 +253,7 @@ pub async fn reset_handler(
         );
     }
 
-    log::info!("QR code slots reset");
+    services::audit::log_action(pool.get_ref(), &username, "reset", Some(&uuid), None, &client_ip).await;
     HttpResponse::Found()
         .insert_header(("Location", format!("{base}/")))
         .finish()
@@ -250,10 +268,7 @@ pub async fn edit_page(
 ) -> HttpResponse {
     let uuid = path.into_inner();
     let base = &config.server.context_path;
-    let username = session
-        .get::<String>("user")
-        .unwrap_or(None)
-        .unwrap_or_default();
+    let username = get_session_username(&session);
     let csrf_token = csrf::ensure_csrf_token(&session);
 
     let record = db_try_optional!(
@@ -271,6 +286,8 @@ pub async fn edit_page(
     ctx.insert("csrf_token", &csrf_token);
     ctx.insert("record", &record);
     ctx.insert("segments", &segments);
+    ctx.insert("ai_enabled", &config.ai.is_some());
+    ctx.insert("active_nav", "qrcode");
 
     render_template(&tmpl, "edit.html", &ctx)
 }
@@ -282,9 +299,12 @@ pub async fn edit_handler(
     pool: web::Data<MySqlPool>,
     session: Session,
     config: web::Data<Config>,
+    req: HttpRequest,
 ) -> HttpResponse {
     let uuid = path.into_inner();
     let base = &config.server.context_path;
+    let username = get_session_username(&session);
+    let client_ip = get_client_ip(&req);
 
     if !csrf::validate_csrf_token(&session, &form.csrf_token) {
         return render_error(
@@ -318,7 +338,8 @@ pub async fn edit_handler(
         );
     }
 
-    log::info!("QR code updated");
+    let detail = format!("max_count={max_count}");
+    services::audit::log_action(pool.get_ref(), &username, "edit", Some(&uuid), Some(&detail), &client_ip).await;
     HttpResponse::Found()
         .insert_header(("Location", format!("{base}/")))
         .finish()
@@ -334,14 +355,10 @@ pub async fn extract_logs_page(
 ) -> HttpResponse {
     let uuid = path.into_inner();
     let base = &config.server.context_path;
-    let username = session
-        .get::<String>("user")
-        .unwrap_or(None)
-        .unwrap_or_default();
+    let username = get_session_username(&session);
     let (page, offset) = calc_page_offset(query.page);
     let list_page = query.list_page.unwrap_or(1);
     let list_keyword = query.list_keyword.clone().unwrap_or_default();
-    log::debug!("Extract logs page: page={page}");
 
     let record = db_try_optional!(
         services::qrcode::get_by_uuid(pool.get_ref(), &uuid).await,
@@ -369,6 +386,8 @@ pub async fn extract_logs_page(
     ctx.insert("total_pages", &total_pages);
     ctx.insert("list_page", &list_page);
     ctx.insert("list_keyword", &list_keyword);
+    ctx.insert("ai_enabled", &config.ai.is_some());
+    ctx.insert("active_nav", "qrcode");
 
     render_template(&tmpl, "logs.html", &ctx)
 }
@@ -391,16 +410,15 @@ pub async fn ai_generate_page(
         );
     }
 
-    let username = session
-        .get::<String>("user")
-        .unwrap_or(None)
-        .unwrap_or_default();
+    let username = get_session_username(&session);
     let csrf_token = csrf::ensure_csrf_token(&session);
 
     let mut ctx = Context::new();
     ctx.insert("base", base);
     ctx.insert("username", &username);
     ctx.insert("csrf_token", &csrf_token);
+    ctx.insert("ai_enabled", &true);
+    ctx.insert("active_nav", "ai");
 
     render_template(&tmpl, "ai_generate.html", &ctx)
 }
@@ -451,8 +469,11 @@ pub async fn ai_create_handler(
     pool: web::Data<MySqlPool>,
     session: Session,
     config: web::Data<Config>,
+    req: HttpRequest,
 ) -> HttpResponse {
     let base = &config.server.context_path;
+    let username = get_session_username(&session);
+    let client_ip = get_client_ip(&req);
 
     if !csrf::validate_csrf_token(&session, &form.csrf_token) {
         return render_error(
@@ -477,17 +498,15 @@ pub async fn ai_create_handler(
     let remark = form.remark.as_deref().filter(|s| !s.trim().is_empty());
 
     match services::qrcode::create(pool.get_ref(), &text_content_json, remark, max_count).await {
-        Ok(_uuid) => {
-            log::info!(
-                "QR code created via AI: max_count={max_count}, segments={}",
-                segments.len()
-            );
+        Ok(uuid) => {
+            let detail = format!("segments={}, max_count={max_count}", segments.len());
+            services::audit::log_action(pool.get_ref(), &username, "ai_create", Some(&uuid), Some(&detail), &client_ip).await;
             HttpResponse::Found()
                 .insert_header(("Location", format!("{base}/")))
                 .finish()
         }
         Err(e) => {
-            log::warn!("QR code insert failed: error={e}");
+            log::warn!("QR code AI create failed: error={e}");
             render_error(
                 &tmpl,
                 base,
@@ -496,4 +515,41 @@ pub async fn ai_create_handler(
             )
         }
     }
+}
+
+// ---- 审计日志 ----
+
+pub async fn audit_logs_page(
+    tmpl: web::Data<Tera>,
+    pool: web::Data<MySqlPool>,
+    session: Session,
+    config: web::Data<Config>,
+    query: web::Query<AuditLogsQuery>,
+) -> HttpResponse {
+    let base = &config.server.context_path;
+    let username = get_session_username(&session);
+    let action_filter = query.action.clone().unwrap_or_default();
+    let keyword = query.keyword.clone().unwrap_or_default();
+
+    let (total, logs) = db_try!(
+        services::audit::list_logs(pool.get_ref(), &action_filter, &keyword, query.page).await,
+        &tmpl,
+        base
+    );
+
+    let (page, _offset) = calc_page_offset(query.page);
+    let total_pages = calc_total_pages(total);
+
+    let mut ctx = Context::new();
+    ctx.insert("base", base);
+    ctx.insert("username", &username);
+    ctx.insert("logs", &logs);
+    ctx.insert("page", &page);
+    ctx.insert("total_pages", &total_pages);
+    ctx.insert("action_filter", &action_filter);
+    ctx.insert("keyword", &keyword);
+    ctx.insert("ai_enabled", &config.ai.is_some());
+    ctx.insert("active_nav", "audit");
+
+    render_template(&tmpl, "audit_logs.html", &ctx)
 }

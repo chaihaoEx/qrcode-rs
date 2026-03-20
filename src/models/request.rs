@@ -26,6 +26,13 @@ pub struct LogsQuery {
 }
 
 #[derive(Deserialize)]
+pub struct AuditLogsQuery {
+    pub page: Option<i64>,
+    pub action: Option<String>,
+    pub keyword: Option<String>,
+}
+
+#[derive(Deserialize)]
 pub struct CreateForm {
     pub text_content: String,
     pub remark: Option<String>,

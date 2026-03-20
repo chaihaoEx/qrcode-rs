@@ -23,6 +23,7 @@ pub fn configure(context_path: String) -> impl FnOnce(&mut web::ServiceConfig) {
                 .route("/edit/{uuid}", web::get().to(admin::edit_page))
                 .route("/edit/{uuid}", web::post().to(admin::edit_handler))
                 .route("/logs/{uuid}", web::get().to(admin::extract_logs_page))
+                .route("/audit-logs", web::get().to(admin::audit_logs_page))
                 .route("/ai-generate", web::get().to(admin::ai_generate_page))
                 .route("/ai-generate", web::post().to(admin::ai_generate_handler))
                 .route("/ai-generate/create", web::post().to(admin::ai_create_handler))

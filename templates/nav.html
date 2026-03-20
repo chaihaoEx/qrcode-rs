@@ -1,0 +1,21 @@
+<nav class="topbar">
+    <div class="topbar-inner">
+        <div class="topbar-brand">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="3" height="3"/><line x1="21" y1="14" x2="21" y2="17"/><line x1="14" y1="21" x2="17" y2="21"/>
+            </svg>
+            <span>QRCode-RS</span>
+        </div>
+        <div class="topbar-nav">
+            <a href="{{ base }}/" class="nav-item {% if active_nav == 'qrcode' %}active{% endif %}">二维码管理</a>
+            <a href="{{ base }}/audit-logs" class="nav-item {% if active_nav == 'audit' %}active{% endif %}">操作日志</a>
+            {% if ai_enabled %}
+            <a href="{{ base }}/ai-generate" class="nav-item {% if active_nav == 'ai' %}active{% endif %}">AI 生成</a>
+            {% endif %}
+        </div>
+        <div class="topbar-actions">
+            <span class="topbar-user">{{ username }}</span>
+            <a href="{{ base }}/logout" class="btn btn-ghost btn-sm">退出</a>
+        </div>
+    </div>
+</nav>

@@ -49,6 +49,18 @@ pub struct QrCodeRecord {
 }
 
 #[derive(sqlx::FromRow, Serialize)]
+pub struct AuditLog {
+    pub id: u64,
+    pub username: String,
+    pub action: String,
+    pub target_uuid: Option<String>,
+    pub detail: Option<String>,
+    pub client_ip: String,
+    #[serde(serialize_with = "datetime_format::serialize")]
+    pub created_at: NaiveDateTime,
+}
+
+#[derive(sqlx::FromRow, Serialize)]
 pub struct ExtractLog {
     pub id: u64,
     pub qrcode_id: u64,

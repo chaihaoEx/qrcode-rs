@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+
+{% block title %}操作日志 - QRCode-RS{% endblock %}
+{% block body_class %}body-admin{% endblock %}
+{% block layout_class %}page-admin{% endblock %}
+
+{% block content %}
+{% include "nav.html" %}
+
+<main class="admin-main fade-in">
+    <div class="admin-header">
+        <h1>操作日志</h1>
+    </div>
+
+    <div class="admin-card">
+        <div class="card-toolbar">
+            <form method="GET" action="{{ base }}/audit-logs" class="audit-filter">
+                <select name="action" class="filter-select" onchange="this.form.submit()">
+                    <option value="">全部操作</option>
+                    <option value="login_success" {% if action_filter == "login_success" %}selected{% endif %}>登录成功</option>
+                    <option value="login_failed" {% if action_filter == "login_failed" %}selected{% endif %}>登录失败</option>
+                    <option value="logout" {% if action_filter == "logout" %}selected{% endif %}>退出登录</option>
+                    <option value="create" {% if action_filter == "create" %}selected{% endif %}>创建二维码</option>
+                    <option value="edit" {% if action_filter == "edit" %}selected{% endif %}>编辑二维码</option>
+                    <option value="delete" {% if action_filter == "delete" %}selected{% endif %}>删除二维码</option>
+                    <option value="reset" {% if action_filter == "reset" %}selected{% endif %}>重置提取</option>
+                    <option value="ai_create" {% if action_filter == "ai_create" %}selected{% endif %}>AI 创建</option>
+                </select>
+                <div class="search-bar">
+                    <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                    <input type="text" name="keyword" value="{{ keyword }}" placeholder="搜索用户名、UUID 或 IP...">
+                    {% if keyword %}
+                    <a href="{{ base }}/audit-logs{% if action_filter %}?action={{ action_filter }}{% endif %}" class="search-clear">&times;</a>
+                    {% endif %}
+                </div>
+            </form>
+        </div>
+
+        <div class="table-wrap">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>时间</th>
+                        <th>用户</th>
+                        <th>操作</th>
+                        <th>对象</th>
+                        <th>详情</th>
+                        <th>IP</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for log in logs %}
+                    <tr>
+                        <td class="cell-time">{{ log.created_at }}</td>
+                        <td>{{ log.username }}</td>
+                        <td>
+                            {% if log.action == "login_success" %}
+                                <span class="badge badge-active">登录成功</span>
+                            {% elif log.action == "login_failed" %}
+                                <span class="badge badge-exhausted">登录失败</span>
+                            {% elif log.action == "logout" %}
+                                <span class="badge badge-idle">退出登录</span>
+                            {% elif log.action == "create" %}
+                                <span class="badge badge-active">创建</span>
+                            {% elif log.action == "edit" %}
+                                <span class="badge badge-active">编辑</span>
+                            {% elif log.action == "delete" %}
+                                <span class="badge badge-exhausted">删除</span>
+                            {% elif log.action == "reset" %}
+                                <span class="badge badge-warning">重置</span>
+                            {% elif log.action == "ai_create" %}
+                                <span class="badge badge-active">AI 创建</span>
+                            {% else %}
+                                <span class="badge badge-idle">{{ log.action }}</span>
+                            {% endif %}
+                        </td>
+                        <td class="cell-mono">{% if log.target_uuid %}{{ log.target_uuid | truncate(length=12) }}{% else %}-{% endif %}</td>
+                        <td class="cell-muted">{{ log.detail | default(value="-") }}</td>
+                        <td class="cell-mono">{{ log.client_ip }}</td>
+                    </tr>
+                    {% endfor %}
+                    {% if logs | length == 0 %}
+                    <tr><td colspan="6" class="cell-empty">
+                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.3"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                        <span>暂无操作日志</span>
+                    </td></tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+
+        {% if total_pages > 1 %}
+        <div class="pagination" id="pagination" data-page="{{ page }}" data-total="{{ total_pages }}" data-base="{{ base }}" data-action="{{ action_filter }}" data-keyword="{{ keyword }}"></div>
+        <script>
+        (function() {
+            var el = document.getElementById('pagination');
+            var cur = parseInt(el.dataset.page);
+            var total = parseInt(el.dataset.total);
+            var base = el.dataset.base;
+            var action = el.dataset.action;
+            var kw = el.dataset.keyword;
+            function href(p) {
+                var s = base + '/audit-logs?page=' + p;
+                if (action) s += '&action=' + encodeURIComponent(action);
+                if (kw) s += '&keyword=' + encodeURIComponent(kw);
+                return s;
+            }
+            var html = '';
+            html += '<a class="page-btn' + (cur <= 1 ? ' disabled' : '') + '" href="' + (cur > 1 ? href(cur - 1) : '#') + '" title="上一页">&lsaquo;</a>';
+            var pages = [];
+            pages.push(1);
+            var lo = Math.max(2, cur - 2), hi = Math.min(total - 1, cur + 2);
+            if (lo > 2) pages.push('...');
+            for (var i = lo; i <= hi; i++) pages.push(i);
+            if (hi < total - 1) pages.push('...');
+            if (total > 1) pages.push(total);
+            for (var j = 0; j < pages.length; j++) {
+                var p = pages[j];
+                if (p === '...') {
+                    html += '<span class="page-ellipsis">...</span>';
+                } else {
+                    html += '<a class="page-btn' + (p === cur ? ' active' : '') + '" href="' + href(p) + '">' + p + '</a>';
+                }
+            }
+            html += '<a class="page-btn' + (cur >= total ? ' disabled' : '') + '" href="' + (cur < total ? href(cur + 1) : '#') + '" title="下一页">&rsaquo;</a>';
+            html += '<span class="page-sep"></span>';
+            html += '<span class="page-jump">跳至 <input type="number" id="jumpInput" min="1" max="' + total + '" value="' + cur + '"> 页 <button class="page-jump-btn" id="jumpBtn">GO</button></span>';
+            el.innerHTML = html;
+            var jumpInput = document.getElementById('jumpInput');
+            var jumpBtn = document.getElementById('jumpBtn');
+            function doJump() {
+                var v = parseInt(jumpInput.value);
+                if (v >= 1 && v <= total && v !== cur) window.location.href = href(v);
+            }
+            jumpBtn.addEventListener('click', doJump);
+            jumpInput.addEventListener('keydown', function(e) { if (e.key === 'Enter') doJump(); });
+        })();
+        </script>
+        {% endif %}
+    </div>
+</main>
+{% endblock %}
