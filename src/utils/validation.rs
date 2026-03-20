@@ -8,11 +8,8 @@ use super::MAX_CONTENT_LENGTH;
 pub fn get_client_ip(req: &HttpRequest) -> String {
     let info = req.connection_info();
     let raw = info.realip_remote_addr().unwrap_or("unknown");
-    if raw.len() > 45 {
-        raw[..45].to_string()
-    } else {
-        raw.to_string()
-    }
+    let end = raw.len().min(45);
+    raw[..end].to_string()
 }
 
 /// Parse text_content into segments. Falls back to single segment if not JSON array.
