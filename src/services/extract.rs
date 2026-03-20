@@ -1,6 +1,7 @@
 use sqlx::MySqlPool;
 
 use crate::models::{ClaimResponse, QrCodeRecord};
+use crate::utils::masking::{mask_browser_id, mask_ip, mask_uuid};
 use crate::utils::validation::parse_segments;
 
 /// Check if a QR code exists by UUID. Returns its id if found.
@@ -62,7 +63,9 @@ pub async fn claim_slot(
         let segments = parse_segments(&record.text_content);
         let text = segments.get(seg_idx as usize).cloned().unwrap_or_default();
         log::debug!(
-            "Extract claim idempotent: uuid={uuid}, browser_id={browser_id}, segment={seg_idx}"
+            "Extract claim idempotent: uuid={}, browser_id={}, segment={seg_idx}",
+            mask_uuid(uuid),
+            mask_browser_id(browser_id)
         );
         return Ok(ClaimResponse {
             status: "ok".to_string(),
@@ -76,7 +79,8 @@ pub async fn claim_slot(
     if record.used_count as usize >= segments.len() {
         let _ = tx.rollback().await;
         log::warn!(
-            "Extract claim exhausted: uuid={uuid}, used={}, segments={}",
+            "Extract claim exhausted: uuid={}, used={}, segments={}",
+            mask_uuid(uuid),
             record.used_count,
             segments.len()
         );
@@ -128,7 +132,7 @@ pub async fn claim_slot(
         .await
         .map_err(|e| format!("commit failed: {e}"))?;
 
-    log::info!("Extract claim success: uuid={uuid}, ip={client_ip}, browser_id={browser_id}, segment={segment_index}");
+    log::info!("Extract claim success: uuid={}, ip={}, browser_id={}, segment={segment_index}", mask_uuid(uuid), mask_ip(client_ip), mask_browser_id(browser_id));
 
     Ok(ClaimResponse {
         status: "ok".to_string(),

@@ -6,6 +6,7 @@ use tera::{Context, Tera};
 use crate::config::Config;
 use crate::csrf;
 use crate::rate_limit::RateLimiter;
+use crate::utils::masking::{mask_ip, mask_username};
 
 fn get_client_ip(req: &HttpRequest) -> String {
     req.connection_info()
@@ -73,7 +74,7 @@ pub async fn login_handler(
     }
 
     if !rate_limiter.check_and_increment(&client_ip) {
-        log::warn!("Login rate limited: ip={client_ip}");
+        log::warn!("Login rate limited: ip={}", mask_ip(&client_ip));
         return HttpResponse::Found()
             .insert_header(("Location", format!("{base}/login?error=rate")))
             .finish();
@@ -87,12 +88,12 @@ pub async fn login_handler(
             return HttpResponse::InternalServerError().body("Session error");
         }
         rate_limiter.reset(&client_ip);
-        log::info!("Login success: user={}, ip={client_ip}", form.username);
+        log::info!("Login success: user={}, ip={}", mask_username(&form.username), mask_ip(&client_ip));
         HttpResponse::Found()
             .insert_header(("Location", format!("{base}/")))
             .finish()
     } else {
-        log::warn!("Login failed: user={}, ip={client_ip}", form.username);
+        log::warn!("Login failed: user={}, ip={}", mask_username(&form.username), mask_ip(&client_ip));
         HttpResponse::Found()
             .insert_header(("Location", format!("{base}/login?error=1")))
             .finish()
@@ -105,7 +106,7 @@ pub async fn logout(session: Session, config: web::Data<Config>) -> HttpResponse
         .get::<String>("user")
         .unwrap_or(None)
         .unwrap_or_default();
-    log::info!("Logout: user={username}");
+    log::info!("Logout: user={}", mask_username(&username));
     session.purge();
     HttpResponse::Found()
         .insert_header(("Location", format!("{base}/login")))

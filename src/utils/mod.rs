@@ -1,4 +1,5 @@
 pub mod crypto;
+pub mod masking;
 pub mod pagination;
 pub mod render;
 pub mod validation;

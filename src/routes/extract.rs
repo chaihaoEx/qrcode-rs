@@ -5,6 +5,7 @@ use tera::{Context, Tera};
 use crate::config::Config;
 use crate::services;
 use crate::utils::crypto::*;
+use crate::utils::masking::mask_uuid;
 use crate::utils::render::*;
 use crate::db_try;
 
@@ -18,7 +19,7 @@ pub async fn extract_page(
     let (uuid, hash) = path.into_inner();
     let base = &config.server.context_path;
     let legacy_support = config.server.legacy_hash_support.unwrap_or(true);
-    log::debug!("Extract page visited: uuid={uuid}");
+    log::debug!("Extract page visited: uuid={}", mask_uuid(&uuid));
 
     if !verify_extract_hash(&uuid, &hash, &config.server.extract_salt, legacy_support) {
         return render_error(
@@ -96,7 +97,7 @@ pub async fn extract_claim_handler(
             }
         }
         Err(e) => {
-            log::warn!("Extract claim failed: uuid={uuid}, error={e}");
+            log::warn!("Extract claim failed: uuid={}, error={e}", mask_uuid(&uuid));
             HttpResponse::InternalServerError()
                 .json(serde_json::json!({"status": "error"}))
         }

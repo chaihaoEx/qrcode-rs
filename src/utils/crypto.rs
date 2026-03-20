@@ -37,53 +37,58 @@ pub fn verify_extract_hash(uuid: &str, hash: &str, salt: &str, legacy_support: b
 mod tests {
     use super::*;
 
+    const TEST_UUID: &str = "test-uuid";
+    const TEST_UUID_1: &str = "uuid-1";
+    const TEST_UUID_2: &str = "uuid-2";
+    const TEST_SALT: &str = "test-salt-not-for-production";
+
     #[test]
     fn test_generate_extract_hash_deterministic() {
-        let h1 = generate_extract_hash("test-uuid", "salt");
-        let h2 = generate_extract_hash("test-uuid", "salt");
+        let h1 = generate_extract_hash(TEST_UUID, TEST_SALT);
+        let h2 = generate_extract_hash(TEST_UUID, TEST_SALT);
         assert_eq!(h1, h2);
         assert_eq!(h1.len(), 16);
     }
 
     #[test]
     fn test_generate_extract_hash_different_inputs() {
-        let h1 = generate_extract_hash("uuid-1", "salt");
-        let h2 = generate_extract_hash("uuid-2", "salt");
+        let h1 = generate_extract_hash(TEST_UUID_1, TEST_SALT);
+        let h2 = generate_extract_hash(TEST_UUID_2, TEST_SALT);
         assert_ne!(h1, h2);
     }
 
     #[test]
     fn test_verify_extract_hash_correct() {
-        let hash = generate_extract_hash("test-uuid", "salt");
-        assert!(verify_extract_hash("test-uuid", &hash, "salt", false));
+        let hash = generate_extract_hash(TEST_UUID, TEST_SALT);
+        assert!(verify_extract_hash(TEST_UUID, &hash, TEST_SALT, false));
     }
 
     #[test]
     fn test_verify_extract_hash_wrong() {
         assert!(!verify_extract_hash(
-            "test-uuid",
+            TEST_UUID,
             "0000000000000000",
-            "salt",
+            TEST_SALT,
             false
         ));
     }
 
     #[test]
     fn test_verify_extract_hash_legacy() {
-        let full_hash = generate_extract_hash("test-uuid", "salt");
+        let full_hash = generate_extract_hash(TEST_UUID, TEST_SALT);
         let legacy = &full_hash[..8];
-        assert!(verify_extract_hash("test-uuid", legacy, "salt", true));
-        assert!(!verify_extract_hash("test-uuid", legacy, "salt", false));
+        assert!(verify_extract_hash(TEST_UUID, legacy, TEST_SALT, true));
+        assert!(!verify_extract_hash(TEST_UUID, legacy, TEST_SALT, false));
     }
 
     #[test]
     fn test_verify_extract_hash_wrong_length() {
-        assert!(!verify_extract_hash("test-uuid", "abc", "salt", true));
-        assert!(!verify_extract_hash("test-uuid", "", "salt", true));
+        assert!(!verify_extract_hash(TEST_UUID, "abc", TEST_SALT, true));
+        assert!(!verify_extract_hash(TEST_UUID, "", TEST_SALT, true));
         assert!(!verify_extract_hash(
-            "test-uuid",
+            TEST_UUID,
             "0000000000000000000000",
-            "salt",
+            TEST_SALT,
             true
         ));
     }

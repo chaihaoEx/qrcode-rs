@@ -18,10 +18,10 @@ fn load_rustls_config(cert_path: &str, key_path: &str) -> rustls::ServerConfig {
     use std::io::BufReader;
 
     let cert_file = &mut BufReader::new(
-        std::fs::File::open(cert_path).expect(&format!("Failed to open cert file: {cert_path}")),
+        std::fs::File::open(cert_path).expect("Failed to open TLS cert file"),
     );
     let key_file = &mut BufReader::new(
-        std::fs::File::open(key_path).expect(&format!("Failed to open key file: {key_path}")),
+        std::fs::File::open(key_path).expect("Failed to open TLS key file"),
     );
 
     let certs: Vec<_> = rustls_pemfile::certs(cert_file)
@@ -157,6 +157,8 @@ async fn main() -> std::io::Result<()> {
                 .app_data(tera_data_clone.clone())
                 .app_data(pool_data_clone.clone())
                 .app_data(rate_limiter_clone.clone())
+                .app_data(web::JsonConfig::default().limit(4096))
+                .app_data(web::FormConfig::default().limit(65536))
                 .configure(routes::configure(context_path_clone.clone()))
         })
         .bind_rustls_0_23(&https_addr, tls_config)?
@@ -187,6 +189,8 @@ async fn main() -> std::io::Result<()> {
                 .app_data(tera_data.clone())
                 .app_data(pool_data.clone())
                 .app_data(rate_limiter.clone())
+                .app_data(web::JsonConfig::default().limit(4096))
+                .app_data(web::FormConfig::default().limit(65536))
                 .configure(routes::configure(context_path.clone()))
         });
 
