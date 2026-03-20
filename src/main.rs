@@ -1,13 +1,13 @@
-mod ai;
 mod config;
 mod csrf;
 mod db;
-mod helpers;
 mod middleware;
 mod models;
 mod rate_limit;
 mod routes;
+mod services;
 mod templates;
+mod utils;
 
 use actix_session::{config::PersistentSession, storage::CookieSessionStore, SessionMiddleware};
 use actix_web::cookie::{time::Duration as CookieDuration, Key, SameSite};

@@ -1,13 +1,17 @@
 use actix_session::Session;
 use actix_web::{web, HttpResponse};
-use image::ImageEncoder;
 use sqlx::MySqlPool;
 use tera::{Context, Tera};
 
 use crate::config::Config;
 use crate::csrf;
-use crate::helpers::*;
 use crate::models::*;
+use crate::services;
+use crate::utils::crypto::*;
+use crate::utils::pagination::*;
+use crate::utils::render::*;
+use crate::utils::validation::*;
+use crate::utils::MAX_COUNT_UPPER;
 use crate::{db_try, db_try_optional};
 
 pub async fn list_page(
@@ -27,61 +31,11 @@ pub async fn list_page(
     let (page, offset) = calc_page_offset(query.page);
     log::debug!("list_page: page={page}, keyword={keyword:?}");
 
-    let (total, records) = if keyword.is_empty() {
-        let total: i64 = db_try!(
-            sqlx::query_scalar("SELECT COUNT(*) FROM qr_codes")
-                .fetch_one(pool.get_ref())
-                .await,
-            &tmpl,
-            base
-        );
-
-        let records = db_try!(
-            sqlx::query_as::<_, QrCodeRecord>(
-                "SELECT * FROM qr_codes ORDER BY created_at DESC LIMIT ? OFFSET ?",
-            )
-            .bind(PAGE_SIZE)
-            .bind(offset)
-            .fetch_all(pool.get_ref())
-            .await,
-            &tmpl,
-            base
-        );
-
-        (total, records)
-    } else {
-        // Note: %keyword% LIKE on TEXT column cannot use index.
-        // At current scale this is acceptable; consider full-text search if data grows large.
-        let like_pattern = format!("%{keyword}%");
-
-        let total: i64 = db_try!(
-            sqlx::query_scalar(
-                "SELECT COUNT(*) FROM qr_codes WHERE text_content LIKE ? OR remark LIKE ?",
-            )
-            .bind(&like_pattern)
-            .bind(&like_pattern)
-            .fetch_one(pool.get_ref())
-            .await,
-            &tmpl,
-            base
-        );
-
-        let records = db_try!(
-            sqlx::query_as::<_, QrCodeRecord>(
-                "SELECT * FROM qr_codes WHERE text_content LIKE ? OR remark LIKE ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
-            )
-            .bind(&like_pattern)
-            .bind(&like_pattern)
-            .bind(PAGE_SIZE)
-            .bind(offset)
-            .fetch_all(pool.get_ref())
-            .await,
-            &tmpl,
-            base
-        );
-
-        (total, records)
-    };
+    let (total, records) = db_try!(
+        services::qrcode::list_qrcodes(pool.get_ref(), &keyword, offset).await,
+        &tmpl,
+        base
+    );
 
     let total_pages = calc_total_pages(total);
 
@@ -160,37 +114,29 @@ pub async fn create_handler(
         }
     };
 
-    let uuid = uuid::Uuid::new_v4().to_string();
     let max_count = form.max_count.unwrap_or(5).clamp(1, MAX_COUNT_UPPER);
     let remark = form.remark.as_deref().filter(|s| !s.trim().is_empty());
 
-    if let Err(e) = sqlx::query(
-        "INSERT INTO qr_codes (uuid, text_content, remark, max_count, used_count, created_at) VALUES (?, ?, ?, ?, 0, NOW())",
-    )
-    .bind(&uuid)
-    .bind(&text_content_json)
-    .bind(remark)
-    .bind(max_count)
-    .execute(pool.get_ref())
-    .await
-    {
-        log::warn!("QR code insert failed: uuid={uuid}, error={e}");
-        return render_error(
-            &tmpl,
-            base,
-            "创建失败，请稍后重试",
-            actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
-        );
+    match services::qrcode::create(pool.get_ref(), &text_content_json, remark, max_count).await {
+        Ok(uuid) => {
+            log::info!(
+                "QR code created: uuid={uuid}, max_count={max_count}, segments={}",
+                segments.len()
+            );
+            HttpResponse::Found()
+                .insert_header(("Location", format!("{base}/")))
+                .finish()
+        }
+        Err(e) => {
+            log::warn!("QR code insert failed: error={e}");
+            render_error(
+                &tmpl,
+                base,
+                "创建失败，请稍后重试",
+                actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
+            )
+        }
     }
-
-    log::info!(
-        "QR code created: uuid={uuid}, max_count={max_count}, segments={}",
-        segments.len()
-    );
-
-    HttpResponse::Found()
-        .insert_header(("Location", format!("{base}/")))
-        .finish()
 }
 
 pub async fn download_image(
@@ -211,37 +157,16 @@ pub async fn download_image(
         config.server.public_host, config.server.context_path
     );
 
-    let qr = match qrcode::QrCode::new(url.as_bytes()) {
-        Ok(qr) => qr,
-        Err(_) => return HttpResponse::InternalServerError().body("Failed to generate QR code"),
-    };
-
-    let img = qr
-        .render::<image::Luma<u8>>()
-        .min_dimensions(256, 256)
-        .build();
-
-    let mut buf = std::io::Cursor::new(Vec::new());
-    let encoder = image::codecs::png::PngEncoder::new(&mut buf);
-    if encoder
-        .write_image(
-            img.as_raw(),
-            img.width(),
-            img.height(),
-            image::ExtendedColorType::L8,
-        )
-        .is_err()
-    {
-        return HttpResponse::InternalServerError().body("Failed to encode PNG");
+    match services::qrcode::generate_qr_image(&url) {
+        Ok(png_data) => HttpResponse::Ok()
+            .content_type("image/png")
+            .insert_header((
+                "Content-Disposition",
+                format!("attachment; filename=\"qrcode-{safe_uuid}.png\""),
+            ))
+            .body(png_data),
+        Err(e) => HttpResponse::InternalServerError().body(e),
     }
-
-    HttpResponse::Ok()
-        .content_type("image/png")
-        .insert_header((
-            "Content-Disposition",
-            format!("attachment; filename=\"qrcode-{safe_uuid}.png\""),
-        ))
-        .body(buf.into_inner())
 }
 
 pub async fn delete_handler(
@@ -264,11 +189,7 @@ pub async fn delete_handler(
         );
     }
 
-    if let Err(e) = sqlx::query("DELETE FROM qr_codes WHERE uuid = ?")
-        .bind(&uuid)
-        .execute(pool.get_ref())
-        .await
-    {
+    if let Err(e) = services::qrcode::delete(pool.get_ref(), &uuid).await {
         log::warn!("Delete failed: uuid={uuid}, error={e}");
         return render_error(
             &tmpl,
@@ -304,53 +225,8 @@ pub async fn reset_handler(
         );
     }
 
-    let mut tx = match pool.begin().await {
-        Ok(tx) => tx,
-        Err(e) => {
-            log::warn!("Reset failed: begin transaction: uuid={uuid}, error={e}");
-            return render_error(
-                &tmpl,
-                base,
-                "重置失败，请稍后重试",
-                actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
-            );
-        }
-    };
-
-    if let Err(e) = sqlx::query(
-        "DELETE FROM qr_browser_slots WHERE qrcode_id = (SELECT id FROM qr_codes WHERE uuid = ?)",
-    )
-    .bind(&uuid)
-    .execute(&mut *tx)
-    .await
-    {
-        let _ = tx.rollback().await;
-        log::warn!("Reset failed: delete slots: uuid={uuid}, error={e}");
-        return render_error(
-            &tmpl,
-            base,
-            "重置失败，请稍后重试",
-            actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
-        );
-    }
-
-    if let Err(e) = sqlx::query("UPDATE qr_codes SET used_count = 0 WHERE uuid = ?")
-        .bind(&uuid)
-        .execute(&mut *tx)
-        .await
-    {
-        let _ = tx.rollback().await;
-        log::warn!("Reset failed: update used_count: uuid={uuid}, error={e}");
-        return render_error(
-            &tmpl,
-            base,
-            "重置失败，请稍后重试",
-            actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
-        );
-    }
-
-    if let Err(e) = tx.commit().await {
-        log::warn!("Reset failed: commit: uuid={uuid}, error={e}");
+    if let Err(e) = services::qrcode::reset_slots(pool.get_ref(), &uuid).await {
+        log::warn!("Reset failed: uuid={uuid}, error={e}");
         return render_error(
             &tmpl,
             base,
@@ -381,10 +257,7 @@ pub async fn edit_page(
     let csrf_token = csrf::ensure_csrf_token(&session);
 
     let record = db_try_optional!(
-        sqlx::query_as::<_, QrCodeRecord>("SELECT * FROM qr_codes WHERE uuid = ?",)
-            .bind(&uuid)
-            .fetch_optional(pool.get_ref())
-            .await,
+        services::qrcode::get_by_uuid(pool.get_ref(), &uuid).await,
         &tmpl,
         base,
         "二维码不存在"
@@ -432,15 +305,9 @@ pub async fn edit_handler(
     let max_count = form.max_count.unwrap_or(5).clamp(1, MAX_COUNT_UPPER);
     let remark = form.remark.as_deref().filter(|s| !s.trim().is_empty());
 
-    if let Err(e) = sqlx::query(
-        "UPDATE qr_codes SET text_content = ?, remark = ?, max_count = ? WHERE uuid = ?",
-    )
-    .bind(&text_content_json)
-    .bind(remark)
-    .bind(max_count)
-    .bind(&uuid)
-    .execute(pool.get_ref())
-    .await
+    if let Err(e) =
+        services::qrcode::update(pool.get_ref(), &uuid, &text_content_json, remark, max_count)
+            .await
     {
         log::warn!("QR code update failed: uuid={uuid}, error={e}");
         return render_error(
@@ -477,33 +344,14 @@ pub async fn extract_logs_page(
     log::debug!("Extract logs page: uuid={uuid}, page={page}");
 
     let record = db_try_optional!(
-        sqlx::query_as::<_, QrCodeRecord>("SELECT * FROM qr_codes WHERE uuid = ?",)
-            .bind(&uuid)
-            .fetch_optional(pool.get_ref())
-            .await,
+        services::qrcode::get_by_uuid(pool.get_ref(), &uuid).await,
         &tmpl,
         base,
         "二维码不存在"
     );
 
-    let total: i64 = db_try!(
-        sqlx::query_scalar("SELECT COUNT(*) FROM qr_extract_logs WHERE qrcode_id = ?",)
-            .bind(record.id)
-            .fetch_one(pool.get_ref())
-            .await,
-        &tmpl,
-        base
-    );
-
-    let logs = db_try!(
-        sqlx::query_as::<_, ExtractLog>(
-            "SELECT * FROM qr_extract_logs WHERE qrcode_id = ? ORDER BY extracted_at DESC LIMIT ? OFFSET ?",
-        )
-        .bind(record.id)
-        .bind(PAGE_SIZE)
-        .bind(offset)
-        .fetch_all(pool.get_ref())
-        .await,
+    let (total, logs) = db_try!(
+        services::qrcode::list_extract_logs(pool.get_ref(), record.id, offset).await,
         &tmpl,
         base
     );
@@ -585,7 +433,7 @@ pub async fn ai_generate_handler(
     let style = body.style.as_deref().unwrap_or("").trim();
     let examples = body.examples.as_deref().unwrap_or("").trim();
 
-    match crate::ai::generate_comments(ai_config, topic, count, style, examples).await {
+    match services::ai::generate_comments(ai_config, topic, count, style, examples).await {
         Ok(comments) => {
             HttpResponse::Ok().json(serde_json::json!({"status": "ok", "comments": comments}))
         }
@@ -622,35 +470,30 @@ pub async fn ai_create_handler(
         }
     };
 
-    let uuid = uuid::Uuid::new_v4().to_string();
-    let max_count = form.max_count.unwrap_or(segments.len() as u32).clamp(1, MAX_COUNT_UPPER);
+    let max_count = form
+        .max_count
+        .unwrap_or(segments.len() as u32)
+        .clamp(1, MAX_COUNT_UPPER);
     let remark = form.remark.as_deref().filter(|s| !s.trim().is_empty());
 
-    if let Err(e) = sqlx::query(
-        "INSERT INTO qr_codes (uuid, text_content, remark, max_count, used_count, created_at) VALUES (?, ?, ?, ?, 0, NOW())",
-    )
-    .bind(&uuid)
-    .bind(&text_content_json)
-    .bind(remark)
-    .bind(max_count)
-    .execute(pool.get_ref())
-    .await
-    {
-        log::warn!("QR code insert failed: uuid={uuid}, error={e}");
-        return render_error(
-            &tmpl,
-            base,
-            "创建失败，请稍后重试",
-            actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
-        );
+    match services::qrcode::create(pool.get_ref(), &text_content_json, remark, max_count).await {
+        Ok(uuid) => {
+            log::info!(
+                "QR code created via AI: uuid={uuid}, max_count={max_count}, segments={}",
+                segments.len()
+            );
+            HttpResponse::Found()
+                .insert_header(("Location", format!("{base}/")))
+                .finish()
+        }
+        Err(e) => {
+            log::warn!("QR code insert failed: error={e}");
+            render_error(
+                &tmpl,
+                base,
+                "创建失败，请稍后重试",
+                actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
+            )
+        }
     }
-
-    log::info!(
-        "QR code created via AI: uuid={uuid}, max_count={max_count}, segments={}",
-        segments.len()
-    );
-
-    HttpResponse::Found()
-        .insert_header(("Location", format!("{base}/")))
-        .finish()
 }

@@ -3,8 +3,9 @@ use sqlx::MySqlPool;
 use tera::{Context, Tera};
 
 use crate::config::Config;
-use crate::helpers::*;
-use crate::models::*;
+use crate::services;
+use crate::utils::crypto::*;
+use crate::utils::render::*;
 use crate::db_try;
 
 /// Extract landing page (GET): validates HMAC and UUID, renders skeleton for AJAX
@@ -29,10 +30,7 @@ pub async fn extract_page(
     }
 
     let exists: Option<u64> = db_try!(
-        sqlx::query_scalar("SELECT id FROM qr_codes WHERE uuid = ?")
-            .bind(&uuid)
-            .fetch_optional(pool.get_ref())
-            .await,
+        services::extract::check_exists(pool.get_ref(), &uuid).await,
         &tmpl,
         base
     );
@@ -58,7 +56,7 @@ pub async fn extract_page(
 /// Each browser_id gets one segment sequentially
 pub async fn extract_claim_handler(
     path: web::Path<(String, String)>,
-    body: web::Json<ClaimRequest>,
+    body: web::Json<crate::models::ClaimRequest>,
     pool: web::Data<MySqlPool>,
     config: web::Data<Config>,
     req: HttpRequest,
@@ -88,152 +86,19 @@ pub async fn extract_claim_handler(
         .unwrap_or("unknown")
         .to_string();
 
-    let mut tx = match pool.begin().await {
-        Ok(tx) => tx,
+    match services::extract::claim_slot(pool.get_ref(), &uuid, &browser_id, &client_ip).await {
+        Ok(response) => {
+            if response.status == "not_found" {
+                HttpResponse::NotFound()
+                    .json(serde_json::json!({"status": "error", "message": "not found"}))
+            } else {
+                HttpResponse::Ok().json(response)
+            }
+        }
         Err(e) => {
-            log::warn!("Extract claim: begin transaction failed: uuid={uuid}, error={e}");
-            return HttpResponse::InternalServerError()
-                .json(serde_json::json!({"status": "error"}));
+            log::warn!("Extract claim failed: uuid={uuid}, error={e}");
+            HttpResponse::InternalServerError()
+                .json(serde_json::json!({"status": "error"}))
         }
-    };
-
-    // Row lock
-    let record = match sqlx::query_as::<_, QrCodeRecord>(
-        "SELECT * FROM qr_codes WHERE uuid = ? FOR UPDATE",
-    )
-    .bind(&uuid)
-    .fetch_optional(&mut *tx)
-    .await
-    {
-        Ok(r) => r,
-        Err(e) => {
-            let _ = tx.rollback().await;
-            log::warn!("Extract claim: query failed: uuid={uuid}, error={e}");
-            return HttpResponse::InternalServerError()
-                .json(serde_json::json!({"status": "error"}));
-        }
-    };
-
-    let record = match record {
-        Some(r) => r,
-        None => {
-            let _ = tx.rollback().await;
-            return HttpResponse::NotFound()
-                .json(serde_json::json!({"status": "error", "message": "not found"}));
-        }
-    };
-
-    // Idempotency: check if browser_id already has a slot
-    let existing_slot: Option<u32> = match sqlx::query_scalar(
-        "SELECT segment_index FROM qr_browser_slots WHERE qrcode_id = ? AND browser_id = ?",
-    )
-    .bind(record.id)
-    .bind(&browser_id)
-    .fetch_optional(&mut *tx)
-    .await
-    {
-        Ok(v) => v,
-        Err(e) => {
-            let _ = tx.rollback().await;
-            log::warn!("Extract claim: query slot failed: uuid={uuid}, error={e}");
-            return HttpResponse::InternalServerError()
-                .json(serde_json::json!({"status": "error"}));
-        }
-    };
-
-    if let Some(seg_idx) = existing_slot {
-        let _ = tx.commit().await;
-        let segments = parse_segments(&record.text_content);
-        let text = segments.get(seg_idx as usize).cloned().unwrap_or_default();
-        log::debug!(
-            "Extract claim idempotent: uuid={uuid}, browser_id={browser_id}, segment={seg_idx}"
-        );
-        return HttpResponse::Ok().json(ClaimResponse {
-            status: "ok".to_string(),
-            text_content: Some(text),
-            segment_index: Some(seg_idx),
-        });
     }
-
-    let segments = parse_segments(&record.text_content);
-
-    if record.used_count as usize >= segments.len() {
-        let _ = tx.rollback().await;
-        log::warn!(
-            "Extract claim exhausted: uuid={uuid}, used={}, segments={}",
-            record.used_count,
-            segments.len()
-        );
-        return HttpResponse::Ok().json(ClaimResponse {
-            status: "exhausted".to_string(),
-            text_content: None,
-            segment_index: None,
-        });
-    }
-
-    let segment_index = record.used_count as u32;
-    let text = segments[segment_index as usize].clone();
-
-    // Insert slot
-    if let Err(e) = sqlx::query(
-        "INSERT INTO qr_browser_slots (qrcode_id, browser_id, segment_index, client_ip) VALUES (?, ?, ?, ?)",
-    )
-    .bind(record.id)
-    .bind(&browser_id)
-    .bind(segment_index)
-    .bind(&client_ip)
-    .execute(&mut *tx)
-    .await
-    {
-        let _ = tx.rollback().await;
-        log::warn!("Extract claim: insert slot failed: uuid={uuid}, error={e}");
-        return HttpResponse::InternalServerError()
-            .json(serde_json::json!({"status": "error"}));
-    }
-
-    // Update main table
-    if let Err(e) = sqlx::query(
-        "UPDATE qr_codes SET used_count = used_count + 1, last_extract_ip = ?, last_extract_at = NOW() WHERE id = ?",
-    )
-    .bind(&client_ip)
-    .bind(record.id)
-    .execute(&mut *tx)
-    .await
-    {
-        let _ = tx.rollback().await;
-        log::warn!("Extract claim: update qr_codes failed: uuid={uuid}, error={e}");
-        return HttpResponse::InternalServerError()
-            .json(serde_json::json!({"status": "error"}));
-    }
-
-    // Write extract log — failure rolls back the entire transaction
-    if let Err(e) = sqlx::query(
-        "INSERT INTO qr_extract_logs (qrcode_id, client_ip, browser_id, segment_index, extracted_at) VALUES (?, ?, ?, ?, NOW())",
-    )
-    .bind(record.id)
-    .bind(&client_ip)
-    .bind(&browser_id)
-    .bind(segment_index)
-    .execute(&mut *tx)
-    .await
-    {
-        let _ = tx.rollback().await;
-        log::warn!("Extract claim: insert log failed: uuid={uuid}, error={e}");
-        return HttpResponse::InternalServerError()
-            .json(serde_json::json!({"status": "error"}));
-    }
-
-    if let Err(e) = tx.commit().await {
-        log::warn!("Extract claim: commit failed: uuid={uuid}, error={e}");
-        return HttpResponse::InternalServerError()
-            .json(serde_json::json!({"status": "error"}));
-    }
-
-    log::info!("Extract claim success: uuid={uuid}, ip={client_ip}, browser_id={browser_id}, segment={segment_index}");
-
-    HttpResponse::Ok().json(ClaimResponse {
-        status: "ok".to_string(),
-        text_content: Some(text),
-        segment_index: Some(segment_index),
-    })
 }
