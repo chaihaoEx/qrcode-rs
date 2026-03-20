@@ -10,8 +10,8 @@ cargo build --release                # Release build
 cargo run                            # Run dev server (default: http://127.0.0.1:8084)
 RUST_LOG=debug cargo run             # Run with debug logging
 cargo run -- hash-password <pass>    # Generate bcrypt hash for admin password
-cargo test                           # Run 30 unit tests (helpers, rate_limit, csrf)
-mysql -u root -p < sql/init.sql      # Initialize database (creates DB + tables)
+cargo test                           # Run 34 unit tests
+mysql -u root -p < sql/init.sql      # Initialize database (new installs only)
 ```
 
 Cross-compile for Linux: `cargo build --release --target x86_64-unknown-linux-musl`
@@ -30,12 +30,14 @@ Request → SessionMiddleware → Logger → AuthGuard → Route Handler → Ter
 
 ### Key Modules
 
-- **`src/main.rs`** — Server bootstrap: loads config, initializes DB pool + Tera, configures middleware chain and routes
-- **`src/models.rs`** — Data structures: QrCodeRecord, ExtractLog, form/query structs (CreateForm, ActionForm, ListQuery, LogsQuery)
-- **`src/helpers.rs`** — Constants (PAGE_SIZE, MAX_CONTENT_LENGTH, MAX_COUNT_UPPER), HMAC hash, segment parsing, template rendering, `db_try!`/`db_try_optional!` macros, `validate_segments()`, pagination helpers
+- **`src/main.rs`** — Server bootstrap: loads config, initializes DB pool + Tera, configures middleware chain and routes; includes `JsonConfig::limit(4096)` and `FormConfig::limit(65536)`
+- **`src/models/domain.rs`** — Data structures: QrCodeRecord, ExtractLog, AuditLog
+- **`src/models/request.rs`** — Form/query structs: CreateForm, ActionForm, ListQuery, LogsQuery, AuditLogsQuery, ClaimRequest
+- **`src/utils/`** — crypto (HMAC), pagination, render (template helpers, `db_try!` macros), validation (`get_client_ip`, segment parsing, constants)
+- **`src/services/`** — qrcode (CRUD), extract (slot claim), audit (operation logging), ai (comment generation)
 - **`src/csrf.rs`** — Per-session CSRF token generation and validation
 - **`src/rate_limit.rs`** — IP-based login rate limiter with periodic expired-entry cleanup
-- **`src/routes/admin.rs`** — Admin CRUD handlers: list, create, edit, delete, reset, logs, download_image
+- **`src/routes/admin.rs`** — Admin CRUD handlers: list, create, edit, delete, reset, logs, download_image, audit_logs_page, AI generate
 - **`src/routes/extract.rs`** — Public extract handlers: extract_page (GET), extract_claim_handler (POST JSON)
 - **`src/routes/auth.rs`** — Login (bcrypt verify + rate limit + CSRF), logout (session purge)
 - **`src/middleware.rs`** — AuthGuard: custom actix Transform/Service impl checking session cookies
@@ -55,16 +57,23 @@ Extraction URLs contain an HMAC-SHA256 hash (16 hex chars) computed from `uuid +
 
 ### Database
 
-Three tables in MySQL (`sql/init.sql`):
+Four tables in MySQL (`sql/init.sql` + `sql/migrations/`):
 - **`qr_codes`** — uuid (unique), text_content (JSON array of segments), remark (indexed), max_count, used_count, last_extract_ip, last_extract_at, created_at
 - **`qr_extract_logs`** — qrcode_id (indexed, FK cascade), client_ip, browser_id, segment_index, extracted_at
 - **`qr_browser_slots`** — qrcode_id + browser_id (unique, FK cascade), segment_index, client_ip, assigned_at
+- **`admin_audit_logs`** — username, action, target_uuid, detail, client_ip, created_at (indexes on created_at, username, action)
 
 DB connection is required at startup — app exits if connection fails. Connection pool size and timezone are configurable.
 
+### Database Migrations
+
+Project is live — **never modify `sql/init.sql`**. All schema changes use incremental migration files:
+- `sql/migrations/NNN_description.sql` (e.g., `001_add_audit_logs.sql`)
+- Apply manually: `mysql -u root -p qrcode < sql/migrations/001_add_audit_logs.sql`
+
 ### Templates
 
-Tera templates in `templates/` extend `base.html`. Admin pages use `body-admin`/`page-admin` layout classes. Public extract pages use `body-extract`/`page-center`. All POST forms include a hidden `csrf_token` field. List page delete/reset buttons inject CSRF token via `data-csrf` attribute on `<main>`. Pagination is JS-driven (inline `<script>` blocks reading `data-page`/`data-total` attributes).
+Tera templates in `templates/` extend `base.html`. Admin pages use sidebar layout (`nav.html` included via `{% include %}`). Each admin page passes `active_nav` ("qrcode"/"audit"/"ai") and `ai_enabled` to control navigation. Mobile uses hamburger menu + sliding sidebar overlay. Public extract pages use `body-extract`/`page-center`. All POST forms include a hidden `csrf_token` field. List page delete/reset buttons inject CSRF token via `data-csrf` attribute on `<main>`. Pagination is JS-driven (inline `<script>` blocks reading `data-page`/`data-total` attributes).
 
 ### Configuration
 
@@ -79,7 +88,14 @@ Tera templates in `templates/` extend `base.html`. Admin pages use `body-admin`/
 
 ### Logging Convention
 
-Uses `log` crate with `env_logger`. Levels: **debug** for request params and flow tracing, **info** for business events (login, create, extract), **warn** for failures (auth, exhausted codes, DB errors). Control via `RUST_LOG` env var.
+Uses `log` crate with `env_logger`. **Do not log sensitive data** (IP, username, UUID, browser_id) — CodeQL taint tracking will flag it. Use `services::audit::log_action()` for operation tracking instead. Levels: **debug** for flow tracing, **info** for business events, **warn** for failures. Control via `RUST_LOG` env var.
+
+### CI/CD
+
+- GitHub Actions (`.github/workflows/rust.yml`): builds with `x86_64-unknown-linux-musl` for static linking
+- Tag push (`v*`) triggers automatic Release with artifact
+- CodeQL security scanning runs automatically on push to main
+- `gh` CLI used for releases, issues, and project management
 
 ### Deployment Notes
 
