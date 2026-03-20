@@ -5,7 +5,6 @@ use tera::{Context, Tera};
 use crate::config::Config;
 use crate::services;
 use crate::utils::crypto::*;
-use crate::utils::masking::mask_uuid;
 use crate::utils::render::*;
 use crate::db_try;
 
@@ -19,7 +18,7 @@ pub async fn extract_page(
     let (uuid, hash) = path.into_inner();
     let base = &config.server.context_path;
     let legacy_support = config.server.legacy_hash_support.unwrap_or(true);
-    log::debug!("Extract page visited: uuid={}", mask_uuid(&uuid));
+    log::debug!("Extract page visited");
 
     if !verify_extract_hash(&uuid, &hash, &config.server.extract_salt, legacy_support) {
         return render_error(
@@ -70,9 +69,12 @@ pub async fn extract_claim_handler(
             .json(serde_json::json!({"status": "error", "message": "invalid hash"}));
     }
 
+    if body.browser_id.len() > 36 {
+        return HttpResponse::BadRequest()
+            .json(serde_json::json!({"status": "error", "message": "invalid browser_id"}));
+    }
     let browser_id = body.browser_id.trim().to_string();
     if browser_id.is_empty()
-        || browser_id.len() > 36
         || !browser_id
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-')
@@ -97,7 +99,7 @@ pub async fn extract_claim_handler(
             }
         }
         Err(e) => {
-            log::warn!("Extract claim failed: uuid={}, error={e}", mask_uuid(&uuid));
+            log::warn!("Extract claim failed: error={e}");
             HttpResponse::InternalServerError()
                 .json(serde_json::json!({"status": "error"}))
         }

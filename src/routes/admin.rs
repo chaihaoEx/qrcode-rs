@@ -8,7 +8,6 @@ use crate::csrf;
 use crate::models::*;
 use crate::services;
 use crate::utils::crypto::*;
-use crate::utils::masking::mask_uuid;
 use crate::utils::pagination::*;
 use crate::utils::render::*;
 use crate::utils::validation::*;
@@ -119,10 +118,9 @@ pub async fn create_handler(
     let remark = form.remark.as_deref().filter(|s| !s.trim().is_empty());
 
     match services::qrcode::create(pool.get_ref(), &text_content_json, remark, max_count).await {
-        Ok(uuid) => {
+        Ok(_uuid) => {
             log::info!(
-                "QR code created: uuid={}, max_count={max_count}, segments={}",
-                mask_uuid(&uuid),
+                "QR code created: max_count={max_count}, segments={}",
                 segments.len()
             );
             HttpResponse::Found()
@@ -152,7 +150,7 @@ pub async fn download_image(
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
         .take(36)
         .collect();
-    log::info!("Download QR image: uuid={}", mask_uuid(&safe_uuid));
+    log::info!("Download QR image");
     let hash = generate_extract_hash(&safe_uuid, &config.server.extract_salt);
     let url = format!(
         "{}{}/extract/{safe_uuid}/{hash}",
@@ -192,7 +190,7 @@ pub async fn delete_handler(
     }
 
     if let Err(e) = services::qrcode::delete(pool.get_ref(), &uuid).await {
-        log::warn!("Delete failed: uuid={}, error={e}", mask_uuid(&uuid));
+        log::warn!("Delete failed: error={e}");
         return render_error(
             &tmpl,
             base,
@@ -201,7 +199,7 @@ pub async fn delete_handler(
         );
     }
 
-    log::info!("QR code deleted: uuid={}", mask_uuid(&uuid));
+    log::info!("QR code deleted");
     HttpResponse::Found()
         .insert_header(("Location", format!("{base}/")))
         .finish()
@@ -228,7 +226,7 @@ pub async fn reset_handler(
     }
 
     if let Err(e) = services::qrcode::reset_slots(pool.get_ref(), &uuid).await {
-        log::warn!("Reset failed: uuid={}, error={e}", mask_uuid(&uuid));
+        log::warn!("Reset failed: error={e}");
         return render_error(
             &tmpl,
             base,
@@ -237,7 +235,7 @@ pub async fn reset_handler(
         );
     }
 
-    log::info!("QR code slots reset: uuid={}", mask_uuid(&uuid));
+    log::info!("QR code slots reset");
     HttpResponse::Found()
         .insert_header(("Location", format!("{base}/")))
         .finish()
@@ -311,7 +309,7 @@ pub async fn edit_handler(
         services::qrcode::update(pool.get_ref(), &uuid, &text_content_json, remark, max_count)
             .await
     {
-        log::warn!("QR code update failed: uuid={}, error={e}", mask_uuid(&uuid));
+        log::warn!("QR code update failed: error={e}");
         return render_error(
             &tmpl,
             base,
@@ -320,7 +318,7 @@ pub async fn edit_handler(
         );
     }
 
-    log::info!("QR code updated: uuid={}", mask_uuid(&uuid));
+    log::info!("QR code updated");
     HttpResponse::Found()
         .insert_header(("Location", format!("{base}/")))
         .finish()
@@ -343,7 +341,7 @@ pub async fn extract_logs_page(
     let (page, offset) = calc_page_offset(query.page);
     let list_page = query.list_page.unwrap_or(1);
     let list_keyword = query.list_keyword.clone().unwrap_or_default();
-    log::debug!("Extract logs page: uuid={}, page={page}", mask_uuid(&uuid));
+    log::debug!("Extract logs page: page={page}");
 
     let record = db_try_optional!(
         services::qrcode::get_by_uuid(pool.get_ref(), &uuid).await,
@@ -479,10 +477,9 @@ pub async fn ai_create_handler(
     let remark = form.remark.as_deref().filter(|s| !s.trim().is_empty());
 
     match services::qrcode::create(pool.get_ref(), &text_content_json, remark, max_count).await {
-        Ok(uuid) => {
+        Ok(_uuid) => {
             log::info!(
-                "QR code created via AI: uuid={}, max_count={max_count}, segments={}",
-                mask_uuid(&uuid),
+                "QR code created via AI: max_count={max_count}, segments={}",
                 segments.len()
             );
             HttpResponse::Found()

@@ -6,7 +6,6 @@ use tera::{Context, Tera};
 use crate::config::Config;
 use crate::csrf;
 use crate::rate_limit::RateLimiter;
-use crate::utils::masking::{mask_ip, mask_username};
 
 fn get_client_ip(req: &HttpRequest) -> String {
     req.connection_info()
@@ -14,6 +13,9 @@ fn get_client_ip(req: &HttpRequest) -> String {
         .unwrap_or("unknown")
         .to_string()
 }
+
+const MAX_USERNAME_LEN: usize = 100;
+const MAX_PASSWORD_LEN: usize = 200;
 
 #[derive(Deserialize)]
 pub struct LoginForm {
@@ -67,6 +69,12 @@ pub async fn login_handler(
     let base = &config.server.context_path;
     let client_ip = get_client_ip(&req);
 
+    if form.username.len() > MAX_USERNAME_LEN || form.password.len() > MAX_PASSWORD_LEN {
+        return HttpResponse::Found()
+            .insert_header(("Location", format!("{base}/login?error=1")))
+            .finish();
+    }
+
     if !csrf::validate_csrf_token(&session, &form.csrf_token) {
         return HttpResponse::Found()
             .insert_header(("Location", format!("{base}/login?error=1")))
@@ -74,7 +82,7 @@ pub async fn login_handler(
     }
 
     if !rate_limiter.check_and_increment(&client_ip) {
-        log::warn!("Login rate limited: ip={}", mask_ip(&client_ip));
+        log::warn!("Login rate limited");
         return HttpResponse::Found()
             .insert_header(("Location", format!("{base}/login?error=rate")))
             .finish();
@@ -88,12 +96,12 @@ pub async fn login_handler(
             return HttpResponse::InternalServerError().body("Session error");
         }
         rate_limiter.reset(&client_ip);
-        log::info!("Login success: user={}, ip={}", mask_username(&form.username), mask_ip(&client_ip));
+        log::info!("Login success");
         HttpResponse::Found()
             .insert_header(("Location", format!("{base}/")))
             .finish()
     } else {
-        log::warn!("Login failed: user={}, ip={}", mask_username(&form.username), mask_ip(&client_ip));
+        log::warn!("Login failed");
         HttpResponse::Found()
             .insert_header(("Location", format!("{base}/login?error=1")))
             .finish()
@@ -102,11 +110,11 @@ pub async fn login_handler(
 
 pub async fn logout(session: Session, config: web::Data<Config>) -> HttpResponse {
     let base = &config.server.context_path;
-    let username = session
+    let _username = session
         .get::<String>("user")
         .unwrap_or(None)
         .unwrap_or_default();
-    log::info!("Logout: user={}", mask_username(&username));
+    log::info!("Logout");
     session.purge();
     HttpResponse::Found()
         .insert_header(("Location", format!("{base}/login")))
