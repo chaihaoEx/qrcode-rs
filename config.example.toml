@@ -27,3 +27,9 @@ url = "mysql://CHANGE_USER:CHANGE_PASSWORD@localhost:3306/qrcode_db"
 # max_connections = 10
 # 数据库会话时区（默认 +08:00）
 # timezone = "+08:00"
+
+# AI 评论生成（可选，不配置则隐藏 AI 功能入口）
+# [ai]
+# base_url = "https://api.deepseek.com/v1"
+# api_key = "sk-xxx"
+# model = "deepseek-chat"

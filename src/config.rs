@@ -6,6 +6,20 @@ pub struct Config {
     pub server: ServerConfig,
     pub admin: AdminConfig,
     pub database: DatabaseConfig,
+    #[serde(default)]
+    pub ai: Option<AiConfig>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct AiConfig {
+    pub base_url: String,
+    pub api_key: String,
+    #[serde(default = "default_model")]
+    pub model: String,
+}
+
+fn default_model() -> String {
+    "deepseek-chat".to_string()
 }
 
 #[derive(Debug, Deserialize, Clone)]
