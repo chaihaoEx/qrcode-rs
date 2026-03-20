@@ -39,10 +39,16 @@ pub struct DatabaseConfig {
     pub url: String,
     #[serde(default = "default_max_connections")]
     pub max_connections: u32,
+    #[serde(default = "default_timezone")]
+    pub timezone: String,
 }
 
 fn default_max_connections() -> u32 {
     10
+}
+
+fn default_timezone() -> String {
+    "+08:00".to_string()
 }
 
 impl Config {
@@ -52,6 +58,11 @@ impl Config {
         let mut config: Config = toml::from_str(&content)?;
         // 去除尾部斜杠
         config.server.context_path = config.server.context_path.trim_end_matches('/').to_string();
+
+        if config.server.secret_key.len() < 64 {
+            return Err("secret_key must be at least 64 characters".into());
+        }
+
         Ok(config)
     }
 }

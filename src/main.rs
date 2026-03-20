@@ -95,10 +95,18 @@ async fn main() -> std::io::Result<()> {
     let bind_addr = format!("{}:{}", config.server.host, config.server.port);
 
     // Initialize database pool (required — all features depend on it)
-    let db_pool = db::init_pool(&config.database.url, config.database.max_connections)
-        .await
-        .expect("Database connection required. Check database config and restart.");
-    log::info!("Database connected (max_connections={})", config.database.max_connections);
+    let db_pool = db::init_pool(
+        &config.database.url,
+        config.database.max_connections,
+        &config.database.timezone,
+    )
+    .await
+    .expect("Database connection required. Check database config and restart.");
+    log::info!(
+        "Database connected (max_connections={}, timezone={})",
+        config.database.max_connections,
+        config.database.timezone
+    );
 
     // Initialize template engine
     let tera = templates::init_templates();

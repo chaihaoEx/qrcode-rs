@@ -25,3 +25,5 @@ password_hash = "CHANGE_ME_run_cargo_run_hash_password_to_generate"
 url = "mysql://CHANGE_USER:CHANGE_PASSWORD@localhost:3306/qrcode_db"
 # 数据库连接池最大连接数（默认 10）
 # max_connections = 10
+# 数据库会话时区（默认 +08:00）
+# timezone = "+08:00"
