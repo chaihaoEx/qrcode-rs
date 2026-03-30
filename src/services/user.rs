@@ -3,6 +3,21 @@ use sqlx::MySqlPool;
 
 use crate::models::AdminUser;
 
+pub(crate) fn validate_username(username: &str) -> Result<String, String> {
+    let trimmed = username.trim();
+    if trimmed.is_empty() || trimmed.len() > 100 {
+        return Err("用户名长度需在 1-100 字符之间".to_string());
+    }
+    Ok(trimmed.to_string())
+}
+
+pub(crate) fn validate_password(password: &str, label: &str) -> Result<(), String> {
+    if password.len() < 8 || password.len() > 200 {
+        return Err(format!("{label}长度需在 8-200 字符之间"));
+    }
+    Ok(())
+}
+
 /// List all admin users.
 pub async fn list_users(pool: &MySqlPool) -> Result<Vec<AdminUser>, sqlx::Error> {
     sqlx::query_as::<_, AdminUser>("SELECT * FROM admin_users ORDER BY created_at ASC")
@@ -12,14 +27,8 @@ pub async fn list_users(pool: &MySqlPool) -> Result<Vec<AdminUser>, sqlx::Error>
 
 /// Create a new admin user. Returns error message on failure.
 pub async fn create_user(pool: &MySqlPool, username: &str, password: &str) -> Result<(), String> {
-    let username = username.trim();
-    if username.is_empty() || username.len() > 100 {
-        return Err("用户名长度需在 1-100 字符之间".to_string());
-    }
-
-    if password.len() < 8 || password.len() > 200 {
-        return Err("密码长度需在 8-200 字符之间".to_string());
-    }
+    let username = validate_username(username)?;
+    validate_password(password, "密码")?;
 
     let password_hash = bcrypt::hash(password, 12).map_err(|e| format!("密码加密失败: {e}"))?;
 
@@ -56,9 +65,7 @@ pub async fn change_password(
     old_password: &str,
     new_password: &str,
 ) -> Result<(), String> {
-    if new_password.len() < 8 || new_password.len() > 200 {
-        return Err("新密码长度需在 8-200 字符之间".to_string());
-    }
+    validate_password(new_password, "新密码")?;
 
     let user = sqlx::query_as::<_, AdminUser>("SELECT * FROM admin_users WHERE username = ?")
         .bind(username)
@@ -146,5 +153,52 @@ pub async fn verify_db_user(
                 .await;
         }
         Err("密码错误".to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_username_valid() {
+        assert_eq!(validate_username("alice").unwrap(), "alice");
+    }
+
+    #[test]
+    fn test_validate_username_trims() {
+        assert_eq!(validate_username("  bob  ").unwrap(), "bob");
+    }
+
+    #[test]
+    fn test_validate_username_empty() {
+        assert!(validate_username("").is_err());
+    }
+
+    #[test]
+    fn test_validate_username_only_spaces() {
+        assert!(validate_username("   ").is_err());
+    }
+
+    #[test]
+    fn test_validate_username_too_long() {
+        let name = "a".repeat(101);
+        assert!(validate_username(&name).is_err());
+    }
+
+    #[test]
+    fn test_validate_username_at_limit() {
+        let name = "a".repeat(100);
+        assert!(validate_username(&name).is_ok());
+    }
+
+    #[test]
+    fn test_validate_password_valid() {
+        assert!(validate_password("12345678", "密码").is_ok());
+    }
+
+    #[test]
+    fn test_validate_password_too_short() {
+        assert!(validate_password("1234567", "密码").is_err());
     }
 }

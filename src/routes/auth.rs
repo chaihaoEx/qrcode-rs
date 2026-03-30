@@ -12,6 +12,10 @@ use crate::utils::validation::get_client_ip;
 const MAX_USERNAME_LEN: usize = 100;
 const MAX_PASSWORD_LEN: usize = 200;
 
+pub(crate) fn validate_login_input_length(username: &str, password: &str) -> bool {
+    username.len() <= MAX_USERNAME_LEN && password.len() <= MAX_PASSWORD_LEN
+}
+
 #[derive(Deserialize)]
 pub struct LoginForm {
     pub username: String,
@@ -65,7 +69,7 @@ pub async fn login_handler(
     let base = &config.server.context_path;
     let client_ip = get_client_ip(&req);
 
-    if form.username.len() > MAX_USERNAME_LEN || form.password.len() > MAX_PASSWORD_LEN {
+    if !validate_login_input_length(&form.username, &form.password) {
         return HttpResponse::Found()
             .insert_header(("Location", format!("{base}/login?error=1")))
             .finish();
@@ -180,4 +184,33 @@ pub async fn logout(
     HttpResponse::Found()
         .insert_header(("Location", format!("{base}/login")))
         .finish()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_login_input_valid() {
+        assert!(validate_login_input_length("admin", "password123"));
+    }
+
+    #[test]
+    fn test_login_input_username_too_long() {
+        let name = "a".repeat(101);
+        assert!(!validate_login_input_length(&name, "password123"));
+    }
+
+    #[test]
+    fn test_login_input_password_too_long() {
+        let pass = "a".repeat(201);
+        assert!(!validate_login_input_length("admin", &pass));
+    }
+
+    #[test]
+    fn test_login_input_at_limit() {
+        let name = "a".repeat(100);
+        let pass = "a".repeat(200);
+        assert!(validate_login_input_length(&name, &pass));
+    }
 }

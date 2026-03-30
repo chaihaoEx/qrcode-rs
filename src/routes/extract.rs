@@ -9,6 +9,17 @@ use crate::utils::crypto::*;
 use crate::utils::render::*;
 use crate::utils::validation::get_client_ip;
 
+pub(crate) fn validate_browser_id(browser_id: &str) -> Result<String, &'static str> {
+    if browser_id.len() > 36 {
+        return Err("invalid browser_id");
+    }
+    let trimmed = browser_id.trim().to_string();
+    if trimmed.is_empty() || !trimmed.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return Err("invalid browser_id");
+    }
+    Ok(trimmed)
+}
+
 /// Extract landing page (GET): validates HMAC and UUID, renders skeleton for AJAX
 pub async fn extract_page(
     path: web::Path<(String, String)>,
@@ -70,19 +81,13 @@ pub async fn extract_claim_handler(
             .json(serde_json::json!({"status": "error", "message": "invalid hash"}));
     }
 
-    if body.browser_id.len() > 36 {
-        return HttpResponse::BadRequest()
-            .json(serde_json::json!({"status": "error", "message": "invalid browser_id"}));
-    }
-    let browser_id = body.browser_id.trim().to_string();
-    if browser_id.is_empty()
-        || !browser_id
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-')
-    {
-        return HttpResponse::BadRequest()
-            .json(serde_json::json!({"status": "error", "message": "invalid browser_id"}));
-    }
+    let browser_id = match validate_browser_id(&body.browser_id) {
+        Ok(id) => id,
+        Err(_) => {
+            return HttpResponse::BadRequest()
+                .json(serde_json::json!({"status": "error", "message": "invalid browser_id"}));
+        }
+    };
 
     let client_ip = get_client_ip(&req);
 
@@ -99,5 +104,46 @@ pub async fn extract_claim_handler(
             log::warn!("Extract claim failed: error={e}");
             HttpResponse::InternalServerError().json(serde_json::json!({"status": "error"}))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_browser_id_valid_uuid() {
+        assert!(validate_browser_id("550e8400-e29b-41d4-a716-446655440000").is_ok());
+    }
+
+    #[test]
+    fn test_browser_id_short() {
+        assert_eq!(validate_browser_id("abc-123").unwrap(), "abc-123");
+    }
+
+    #[test]
+    fn test_browser_id_too_long() {
+        let id = "a".repeat(37);
+        assert!(validate_browser_id(&id).is_err());
+    }
+
+    #[test]
+    fn test_browser_id_empty() {
+        assert!(validate_browser_id("").is_err());
+    }
+
+    #[test]
+    fn test_browser_id_spaces_only() {
+        assert!(validate_browser_id("   ").is_err());
+    }
+
+    #[test]
+    fn test_browser_id_special_chars() {
+        assert!(validate_browser_id("abc@123").is_err());
+    }
+
+    #[test]
+    fn test_browser_id_trims() {
+        assert_eq!(validate_browser_id(" abc ").unwrap(), "abc");
     }
 }
