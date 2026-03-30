@@ -94,7 +94,15 @@ pub async fn login_handler(
         }
         let _ = session.insert("role", "super");
         rate_limiter.reset(&client_ip);
-        services::audit::log_action(pool.get_ref(), &form.username, "login_success", None, Some("role=super"), &client_ip).await;
+        services::audit::log_action(
+            pool.get_ref(),
+            &form.username,
+            "login_success",
+            None,
+            Some("role=super"),
+            &client_ip,
+        )
+        .await;
         return HttpResponse::Found()
             .insert_header(("Location", format!("{base}/")))
             .finish();
@@ -109,21 +117,45 @@ pub async fn login_handler(
             }
             let _ = session.insert("role", "admin");
             rate_limiter.reset(&client_ip);
-            services::audit::log_action(pool.get_ref(), &username, "login_success", None, Some("role=admin"), &client_ip).await;
+            services::audit::log_action(
+                pool.get_ref(),
+                &username,
+                "login_success",
+                None,
+                Some("role=admin"),
+                &client_ip,
+            )
+            .await;
             HttpResponse::Found()
                 .insert_header(("Location", format!("{base}/")))
                 .finish()
         }
         Ok(None) => {
             // User not found in either config or DB
-            services::audit::log_action(pool.get_ref(), &form.username, "login_failed", None, None, &client_ip).await;
+            services::audit::log_action(
+                pool.get_ref(),
+                &form.username,
+                "login_failed",
+                None,
+                None,
+                &client_ip,
+            )
+            .await;
             HttpResponse::Found()
                 .insert_header(("Location", format!("{base}/login?error=1")))
                 .finish()
         }
         Err(msg) => {
             // Account locked/disabled
-            services::audit::log_action(pool.get_ref(), &form.username, "login_failed", None, Some(&msg), &client_ip).await;
+            services::audit::log_action(
+                pool.get_ref(),
+                &form.username,
+                "login_failed",
+                None,
+                Some(&msg),
+                &client_ip,
+            )
+            .await;
             HttpResponse::Found()
                 .insert_header(("Location", format!("{base}/login?error=1")))
                 .finish()

@@ -3,11 +3,11 @@ use sqlx::MySqlPool;
 use tera::{Context, Tera};
 
 use crate::config::Config;
+use crate::db_try;
 use crate::services;
 use crate::utils::crypto::*;
 use crate::utils::render::*;
 use crate::utils::validation::get_client_ip;
-use crate::db_try;
 
 /// Extract landing page (GET): validates HMAC and UUID, renders skeleton for AJAX
 pub async fn extract_page(
@@ -97,8 +97,7 @@ pub async fn extract_claim_handler(
         }
         Err(e) => {
             log::warn!("Extract claim failed: error={e}");
-            HttpResponse::InternalServerError()
-                .json(serde_json::json!({"status": "error"}))
+            HttpResponse::InternalServerError().json(serde_json::json!({"status": "error"}))
         }
     }
 }

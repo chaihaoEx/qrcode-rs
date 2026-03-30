@@ -140,7 +140,15 @@ pub async fn create_handler(
     match services::qrcode::create(pool.get_ref(), &text_content_json, remark, max_count).await {
         Ok(uuid) => {
             let detail = format!("segments={}, max_count={max_count}", segments.len());
-            services::audit::log_action(pool.get_ref(), &username, "create", Some(&uuid), Some(&detail), &client_ip).await;
+            services::audit::log_action(
+                pool.get_ref(),
+                &username,
+                "create",
+                Some(&uuid),
+                Some(&detail),
+                &client_ip,
+            )
+            .await;
             HttpResponse::Found()
                 .insert_header(("Location", format!("{base}/")))
                 .finish()
@@ -227,7 +235,15 @@ pub async fn delete_handler(
         );
     }
 
-    services::audit::log_action(pool.get_ref(), &username, "delete", Some(&uuid), None, &client_ip).await;
+    services::audit::log_action(
+        pool.get_ref(),
+        &username,
+        "delete",
+        Some(&uuid),
+        None,
+        &client_ip,
+    )
+    .await;
     HttpResponse::Found()
         .insert_header(("Location", format!("{base}/")))
         .finish()
@@ -266,7 +282,15 @@ pub async fn reset_handler(
         );
     }
 
-    services::audit::log_action(pool.get_ref(), &username, "reset", Some(&uuid), None, &client_ip).await;
+    services::audit::log_action(
+        pool.get_ref(),
+        &username,
+        "reset",
+        Some(&uuid),
+        None,
+        &client_ip,
+    )
+    .await;
     HttpResponse::Found()
         .insert_header(("Location", format!("{base}/")))
         .finish()
@@ -340,8 +364,7 @@ pub async fn edit_handler(
     let remark = form.remark.as_deref().filter(|s| !s.trim().is_empty());
 
     if let Err(e) =
-        services::qrcode::update(pool.get_ref(), &uuid, &text_content_json, remark, max_count)
-            .await
+        services::qrcode::update(pool.get_ref(), &uuid, &text_content_json, remark, max_count).await
     {
         log::warn!("QR code update failed: error={e}");
         return render_error(
@@ -353,7 +376,15 @@ pub async fn edit_handler(
     }
 
     let detail = format!("max_count={max_count}");
-    services::audit::log_action(pool.get_ref(), &username, "edit", Some(&uuid), Some(&detail), &client_ip).await;
+    services::audit::log_action(
+        pool.get_ref(),
+        &username,
+        "edit",
+        Some(&uuid),
+        Some(&detail),
+        &client_ip,
+    )
+    .await;
     HttpResponse::Found()
         .insert_header(("Location", format!("{base}/")))
         .finish()
@@ -473,8 +504,7 @@ pub async fn ai_generate_handler(
         }
         Err(e) => {
             log::warn!("AI generate failed: {e}");
-            HttpResponse::Ok()
-                .json(serde_json::json!({"status": "error", "message": e}))
+            HttpResponse::Ok().json(serde_json::json!({"status": "error", "message": e}))
         }
     }
 }
@@ -516,7 +546,15 @@ pub async fn ai_create_handler(
     match services::qrcode::create(pool.get_ref(), &text_content_json, remark, max_count).await {
         Ok(uuid) => {
             let detail = format!("segments={}, max_count={max_count}", segments.len());
-            services::audit::log_action(pool.get_ref(), &username, "ai_create", Some(&uuid), Some(&detail), &client_ip).await;
+            services::audit::log_action(
+                pool.get_ref(),
+                &username,
+                "ai_create",
+                Some(&uuid),
+                Some(&detail),
+                &client_ip,
+            )
+            .await;
             HttpResponse::Found()
                 .insert_header(("Location", format!("{base}/")))
                 .finish()
@@ -652,12 +690,22 @@ pub async fn create_user_handler(
     let username = get_session_username(&session);
     let client_ip = get_client_ip(&req);
 
-    if let Err(msg) = services::user::create_user(pool.get_ref(), &form.username, &form.password).await {
+    if let Err(msg) =
+        services::user::create_user(pool.get_ref(), &form.username, &form.password).await
+    {
         return render_error(&tmpl, base, &msg, actix_web::http::StatusCode::BAD_REQUEST);
     }
 
     let detail = format!("new_user={}", form.username.trim());
-    services::audit::log_action(pool.get_ref(), &username, "create_user", None, Some(&detail), &client_ip).await;
+    services::audit::log_action(
+        pool.get_ref(),
+        &username,
+        "create_user",
+        None,
+        Some(&detail),
+        &client_ip,
+    )
+    .await;
 
     HttpResponse::Found()
         .insert_header(("Location", format!("{base}/users")))
@@ -706,7 +754,15 @@ pub async fn toggle_user_handler(
     }
 
     let detail = format!("user_id={}, is_active={}", form.id, form.is_active);
-    services::audit::log_action(pool.get_ref(), &username, "toggle_user", None, Some(&detail), &client_ip).await;
+    services::audit::log_action(
+        pool.get_ref(),
+        &username,
+        "toggle_user",
+        None,
+        Some(&detail),
+        &client_ip,
+    )
+    .await;
 
     HttpResponse::Found()
         .insert_header(("Location", format!("{base}/users")))
@@ -779,17 +835,30 @@ pub async fn change_password_handler(
     let username = get_session_username(&session);
     let client_ip = get_client_ip(&req);
 
-    match services::user::change_password(pool.get_ref(), &username, &form.old_password, &form.new_password).await {
+    match services::user::change_password(
+        pool.get_ref(),
+        &username,
+        &form.old_password,
+        &form.new_password,
+    )
+    .await
+    {
         Ok(()) => {
-            services::audit::log_action(pool.get_ref(), &username, "change_password", None, None, &client_ip).await;
+            services::audit::log_action(
+                pool.get_ref(),
+                &username,
+                "change_password",
+                None,
+                None,
+                &client_ip,
+            )
+            .await;
             // Purge session so user must re-login
             session.purge();
             HttpResponse::Found()
                 .insert_header(("Location", format!("{base}/login")))
                 .finish()
         }
-        Err(msg) => {
-            render_error(&tmpl, base, &msg, actix_web::http::StatusCode::BAD_REQUEST)
-        }
+        Err(msg) => render_error(&tmpl, base, &msg, actix_web::http::StatusCode::BAD_REQUEST),
     }
 }

@@ -17,12 +17,10 @@ fn load_rustls_config(cert_path: &str, key_path: &str) -> rustls::ServerConfig {
     use rustls::pki_types::PrivateKeyDer;
     use std::io::BufReader;
 
-    let cert_file = &mut BufReader::new(
-        std::fs::File::open(cert_path).expect("Failed to open TLS cert file"),
-    );
-    let key_file = &mut BufReader::new(
-        std::fs::File::open(key_path).expect("Failed to open TLS key file"),
-    );
+    let cert_file =
+        &mut BufReader::new(std::fs::File::open(cert_path).expect("Failed to open TLS cert file"));
+    let key_file =
+        &mut BufReader::new(std::fs::File::open(key_path).expect("Failed to open TLS key file"));
 
     let certs: Vec<_> = rustls_pemfile::certs(cert_file)
         .collect::<Result<Vec<_>, _>>()
@@ -38,10 +36,7 @@ fn load_rustls_config(cert_path: &str, key_path: &str) -> rustls::ServerConfig {
         .expect("Failed to build TLS config")
 }
 
-async fn redirect_to_https(
-    req: HttpRequest,
-    config: web::Data<config::Config>,
-) -> HttpResponse {
+async fn redirect_to_https(req: HttpRequest, config: web::Data<config::Config>) -> HttpResponse {
     let host = req.connection_info().host().to_string();
     let host_without_port = host.split(':').next().unwrap_or(&host);
     let https_port = config.server.https_port.unwrap();
@@ -68,9 +63,7 @@ fn build_session_middleware(
         .cookie_secure(secure)
         .cookie_same_site(SameSite::Strict)
         .cookie_http_only(true)
-        .session_lifecycle(
-            PersistentSession::default().session_ttl(CookieDuration::hours(8)),
-        )
+        .session_lifecycle(PersistentSession::default().session_ttl(CookieDuration::hours(8)))
         .build()
 }
 
