@@ -138,11 +138,10 @@ pub async fn list_extract_logs(
     qrcode_id: u64,
     offset: i64,
 ) -> Result<(i64, Vec<ExtractLog>), sqlx::Error> {
-    let total: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM qr_extract_logs WHERE qrcode_id = ?")
-            .bind(qrcode_id)
-            .fetch_one(pool)
-            .await?;
+    let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM qr_extract_logs WHERE qrcode_id = ?")
+        .bind(qrcode_id)
+        .fetch_one(pool)
+        .await?;
 
     let logs = sqlx::query_as::<_, ExtractLog>(
         "SELECT * FROM qr_extract_logs WHERE qrcode_id = ? ORDER BY extracted_at DESC LIMIT ? OFFSET ?",
@@ -199,7 +198,10 @@ fn load_system_font() -> Result<Vec<u8>, String> {
             }
         }
     }
-    Err("No CJK font found on system. Install Noto Sans CJK or place a .ttf in static/fonts/".to_string())
+    Err(
+        "No CJK font found on system. Install Noto Sans CJK or place a .ttf in static/fonts/"
+            .to_string(),
+    )
 }
 
 /// Generate a styled QR code PNG image from a URL.
@@ -273,7 +275,8 @@ pub fn generate_qr_image(url: &str, remark: Option<&str>) -> Result<Vec<u8>, Str
         let mut display_remark = String::new();
         let mut current_width: f32 = 0.0;
         let mut truncated = false;
-        let ellipsis_width: f32 = "...".chars()
+        let ellipsis_width: f32 = "..."
+            .chars()
             .map(|c| scaled_font.h_advance(scaled_font.glyph_id(c)))
             .sum();
 

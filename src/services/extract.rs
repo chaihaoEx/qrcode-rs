@@ -25,15 +25,12 @@ pub async fn claim_slot(
         .map_err(|e| format!("begin transaction failed: {e}"))?;
 
     // Row lock
-    let record = sqlx::query_as::<_, QrCodeRecord>(
-        "SELECT * FROM qr_codes WHERE uuid = ? FOR UPDATE",
-    )
-    .bind(uuid)
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(|e| {
-        format!("query failed: {e}")
-    })?;
+    let record =
+        sqlx::query_as::<_, QrCodeRecord>("SELECT * FROM qr_codes WHERE uuid = ? FOR UPDATE")
+            .bind(uuid)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| format!("query failed: {e}"))?;
 
     let record = match record {
         Some(r) => r,

@@ -11,11 +11,7 @@ pub async fn list_users(pool: &MySqlPool) -> Result<Vec<AdminUser>, sqlx::Error>
 }
 
 /// Create a new admin user. Returns error message on failure.
-pub async fn create_user(
-    pool: &MySqlPool,
-    username: &str,
-    password: &str,
-) -> Result<(), String> {
+pub async fn create_user(pool: &MySqlPool, username: &str, password: &str) -> Result<(), String> {
     let username = username.trim();
     if username.is_empty() || username.len() > 100 {
         return Err("用户名长度需在 1-100 字符之间".to_string());
@@ -25,8 +21,7 @@ pub async fn create_user(
         return Err("密码长度需在 8-200 字符之间".to_string());
     }
 
-    let password_hash =
-        bcrypt::hash(password, 12).map_err(|e| format!("密码加密失败: {e}"))?;
+    let password_hash = bcrypt::hash(password, 12).map_err(|e| format!("密码加密失败: {e}"))?;
 
     sqlx::query("INSERT INTO admin_users (username, password_hash) VALUES (?, ?)")
         .bind(username)
@@ -65,21 +60,18 @@ pub async fn change_password(
         return Err("新密码长度需在 8-200 字符之间".to_string());
     }
 
-    let user = sqlx::query_as::<_, AdminUser>(
-        "SELECT * FROM admin_users WHERE username = ?",
-    )
-    .bind(username)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| format!("查询失败: {e}"))?
-    .ok_or_else(|| "用户不存在".to_string())?;
+    let user = sqlx::query_as::<_, AdminUser>("SELECT * FROM admin_users WHERE username = ?")
+        .bind(username)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| format!("查询失败: {e}"))?
+        .ok_or_else(|| "用户不存在".to_string())?;
 
     if !bcrypt::verify(old_password, &user.password_hash).unwrap_or(false) {
         return Err("旧密码错误".to_string());
     }
 
-    let new_hash =
-        bcrypt::hash(new_password, 12).map_err(|e| format!("密码加密失败: {e}"))?;
+    let new_hash = bcrypt::hash(new_password, 12).map_err(|e| format!("密码加密失败: {e}"))?;
 
     sqlx::query("UPDATE admin_users SET password_hash = ? WHERE username = ?")
         .bind(&new_hash)
@@ -99,12 +91,10 @@ pub async fn verify_db_user(
     username: &str,
     password: &str,
 ) -> Result<Option<String>, String> {
-    let user = match sqlx::query_as::<_, AdminUser>(
-        "SELECT * FROM admin_users WHERE username = ?",
-    )
-    .bind(username)
-    .fetch_optional(pool)
-    .await
+    let user = match sqlx::query_as::<_, AdminUser>("SELECT * FROM admin_users WHERE username = ?")
+        .bind(username)
+        .fetch_optional(pool)
+        .await
     {
         Ok(Some(u)) => u,
         Ok(None) => return Ok(None),
@@ -149,12 +139,11 @@ pub async fn verify_db_user(
             .execute(pool)
             .await;
         } else {
-            let _ =
-                sqlx::query("UPDATE admin_users SET failed_attempts = ? WHERE id = ?")
-                    .bind(new_attempts)
-                    .bind(user.id)
-                    .execute(pool)
-                    .await;
+            let _ = sqlx::query("UPDATE admin_users SET failed_attempts = ? WHERE id = ?")
+                .bind(new_attempts)
+                .bind(user.id)
+                .execute(pool)
+                .await;
         }
         Err("密码错误".to_string())
     }

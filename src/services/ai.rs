@@ -76,7 +76,11 @@ pub async fn generate_comments(
     let url = format!("{}/chat/completions", config.base_url.trim_end_matches('/'));
 
     let request_body = serde_json::to_string(&request).unwrap_or_default();
-    log::info!("AI API request: url={url}, model={}, body_len={}", config.model, request_body.len());
+    log::info!(
+        "AI API request: url={url}, model={}, body_len={}",
+        config.model,
+        request_body.len()
+    );
     log::debug!("AI API request body: {request_body}");
 
     let response = client
@@ -97,7 +101,9 @@ pub async fn generate_comments(
         return Err(format!("AI API 返回错误: {status}, {body}"));
     }
 
-    let response_text = response.text().await
+    let response_text = response
+        .text()
+        .await
         .map_err(|e| format!("AI 响应读取失败: {e}"))?;
     log::debug!("AI API response body: {response_text}");
 
@@ -158,10 +164,7 @@ mod tests {
     #[test]
     fn test_extract_json_array_with_markdown() {
         let input = "```json\n[\"hello\", \"world\"]\n```";
-        assert_eq!(
-            extract_json_array(input),
-            Some("[\"hello\", \"world\"]")
-        );
+        assert_eq!(extract_json_array(input), Some("[\"hello\", \"world\"]"));
     }
 
     #[test]
