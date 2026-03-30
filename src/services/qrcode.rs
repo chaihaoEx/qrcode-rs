@@ -330,3 +330,58 @@ pub fn generate_qr_image(url: &str, remark: Option<&str>) -> Result<Vec<u8>, Str
 
     Ok(buf.into_inner())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_emoji_zwj() {
+        assert!(is_emoji('\u{200D}'));
+    }
+
+    #[test]
+    fn test_is_emoji_variation_selector() {
+        assert!(is_emoji('\u{FE0F}'));
+    }
+
+    #[test]
+    fn test_is_emoji_keycap() {
+        assert!(is_emoji('\u{20E3}'));
+    }
+
+    #[test]
+    fn test_is_emoji_sun() {
+        assert!(is_emoji('☀')); // U+2600
+    }
+
+    #[test]
+    fn test_is_emoji_heart() {
+        assert!(is_emoji('❤')); // U+2764
+    }
+
+    #[test]
+    fn test_is_emoji_star() {
+        assert!(is_emoji('⭐')); // U+2B50
+    }
+
+    #[test]
+    fn test_is_emoji_face() {
+        assert!(is_emoji('😀')); // U+1F600
+    }
+
+    #[test]
+    fn test_is_emoji_ascii() {
+        assert!(!is_emoji('A'));
+    }
+
+    #[test]
+    fn test_is_emoji_digit() {
+        assert!(!is_emoji('5'));
+    }
+
+    #[test]
+    fn test_is_emoji_cjk() {
+        assert!(!is_emoji('中'));
+    }
+}

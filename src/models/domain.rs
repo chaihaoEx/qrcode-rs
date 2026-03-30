@@ -86,3 +86,78 @@ pub struct ExtractLog {
     #[serde(serialize_with = "datetime_format::serialize")]
     pub extracted_at: NaiveDateTime,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::NaiveDate;
+
+    #[test]
+    fn test_datetime_format() {
+        #[derive(Serialize)]
+        struct T {
+            #[serde(serialize_with = "datetime_format::serialize")]
+            dt: NaiveDateTime,
+        }
+        let t = T {
+            dt: NaiveDate::from_ymd_opt(2024, 3, 30)
+                .unwrap()
+                .and_hms_opt(15, 45, 30)
+                .unwrap(),
+        };
+        let json = serde_json::to_value(&t).unwrap();
+        assert_eq!(json["dt"], "2024-03-30 15:45:30");
+    }
+
+    #[test]
+    fn test_option_datetime_some() {
+        #[derive(Serialize)]
+        struct T {
+            #[serde(serialize_with = "option_datetime_format::serialize")]
+            dt: Option<NaiveDateTime>,
+        }
+        let t = T {
+            dt: Some(
+                NaiveDate::from_ymd_opt(2024, 1, 1)
+                    .unwrap()
+                    .and_hms_opt(0, 0, 0)
+                    .unwrap(),
+            ),
+        };
+        let json = serde_json::to_value(&t).unwrap();
+        assert_eq!(json["dt"], "2024-01-01 00:00:00");
+    }
+
+    #[test]
+    fn test_option_datetime_none() {
+        #[derive(Serialize)]
+        struct T {
+            #[serde(serialize_with = "option_datetime_format::serialize")]
+            dt: Option<NaiveDateTime>,
+        }
+        let t = T { dt: None };
+        let json = serde_json::to_value(&t).unwrap();
+        assert!(json["dt"].is_null());
+    }
+
+    #[test]
+    fn test_admin_user_skips_password() {
+        let now = NaiveDate::from_ymd_opt(2024, 1, 1)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap();
+        let user = AdminUser {
+            id: 1,
+            username: "admin".to_string(),
+            password_hash: "secret_hash".to_string(),
+            is_active: true,
+            locked_until: None,
+            failed_attempts: 0,
+            created_at: now,
+            updated_at: now,
+        };
+        let json = serde_json::to_value(&user).unwrap();
+        assert!(json.get("password_hash").is_none());
+        assert_eq!(json["username"], "admin");
+    }
+}
