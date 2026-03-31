@@ -1,3 +1,16 @@
+//! 管理后台路由处理模块
+//!
+//! 处理所有管理后台的 HTTP 请求，包括：
+//! - 二维码 CRUD（列表、创建、编辑、删除、重置、下载图片）
+//! - 提取日志查看
+//! - AI 评论生成和创建
+//! - 审计日志查看（仅超级管理员）
+//! - 用户管理（仅超级管理员）
+//! - 密码修改（仅数据库管理员）
+//!
+//! 所有 POST 请求均要求 CSRF 令牌验证。
+//! 角色权限通过 `is_super_admin()` 在各 handler 中检查。
+
 use actix_session::Session;
 use actix_web::{web, HttpRequest, HttpResponse};
 use sqlx::MySqlPool;
@@ -14,6 +27,9 @@ use crate::utils::validation::*;
 use crate::utils::MAX_COUNT_UPPER;
 use crate::{db_try, db_try_optional};
 
+/// 从会话中获取当前登录的用户名。
+///
+/// 会话中无用户信息时返回空字符串（不应发生，AuthGuard 已拦截）。
 fn get_session_username(session: &Session) -> String {
     session
         .get::<String>("user")
@@ -21,6 +37,9 @@ fn get_session_username(session: &Session) -> String {
         .unwrap_or_default()
 }
 
+/// 从会话中获取当前用户的角色。
+///
+/// 返回 `"super"` 或 `"admin"`，默认为 `"admin"`。
 fn get_session_role(session: &Session) -> String {
     session
         .get::<String>("role")
@@ -28,10 +47,18 @@ fn get_session_role(session: &Session) -> String {
         .unwrap_or_else(|| "admin".to_string())
 }
 
+/// 判断当前会话用户是否为超级管理员。
 fn is_super_admin(session: &Session) -> bool {
     get_session_role(session) == "super"
 }
 
+// ============================================================================
+// 二维码 CRUD
+// ============================================================================
+
+/// 二维码列表页（GET `/`）。
+///
+/// 支持分页和关键词搜索，为每条记录生成 HMAC 哈希和截断显示文本。
 pub async fn list_page(
     tmpl: web::Data<Tera>,
     pool: web::Data<MySqlPool>,
@@ -54,6 +81,7 @@ pub async fn list_page(
 
     let total_pages = calc_total_pages(total);
 
+    // 为每条记录生成提取 URL 的 HMAC 哈希
     let extract_hashes: std::collections::HashMap<String, String> = records
         .iter()
         .map(|r| {
@@ -64,6 +92,7 @@ pub async fn list_page(
         })
         .collect();
 
+    // 为每条记录生成截断的显示文本
     let display_texts: std::collections::HashMap<String, String> = records
         .iter()
         .map(|r| (r.uuid.clone(), truncate_display(&r.text_content)))
@@ -86,6 +115,7 @@ pub async fn list_page(
     render_template(&tmpl, "list.html", &ctx)
 }
 
+/// 创建二维码页面（GET `/create`）。
 pub async fn create_page(
     tmpl: web::Data<Tera>,
     session: Session,
@@ -106,6 +136,9 @@ pub async fn create_page(
     render_template(&tmpl, "create.html", &ctx)
 }
 
+/// 创建二维码处理（POST `/create`）。
+///
+/// 校验 CSRF 令牌和文本内容后，创建二维码记录并记录审计日志。
 pub async fn create_handler(
     form: web::Form<CreateForm>,
     tmpl: web::Data<Tera>,
@@ -165,13 +198,17 @@ pub async fn create_handler(
     }
 }
 
+/// 下载二维码图片（GET `/qrcode-image/{uuid}`）。
+///
+/// 生成带样式的 QR 图片 PNG 并以附件形式返回。
+/// UUID 经过安全过滤后用于 `Content-Disposition` 头。
 pub async fn download_image(
     path: web::Path<String>,
     pool: web::Data<MySqlPool>,
     config: web::Data<Config>,
 ) -> HttpResponse {
     let uuid = path.into_inner();
-    // Sanitize UUID for Content-Disposition header safety
+    // 对 UUID 进行安全过滤，防止 Content-Disposition 头注入
     let safe_uuid: String = uuid
         .chars()
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
@@ -184,7 +221,7 @@ pub async fn download_image(
         config.server.public_host, config.server.context_path
     );
 
-    // Fetch remark from DB
+    // 从数据库获取备注文字用于图片渲染
     let remark = match services::qrcode::get_by_uuid(pool.get_ref(), &safe_uuid).await {
         Ok(Some(record)) => record.remark,
         _ => None,
@@ -202,6 +239,9 @@ pub async fn download_image(
     }
 }
 
+/// 删除二维码处理（POST `/delete/{uuid}`）。
+///
+/// 校验 CSRF 后删除记录（关联数据通过外键级联删除），并记录审计日志。
 pub async fn delete_handler(
     path: web::Path<String>,
     form: web::Form<ActionForm>,
@@ -249,6 +289,9 @@ pub async fn delete_handler(
         .finish()
 }
 
+/// 重置二维码提取状态处理（POST `/reset/{uuid}`）。
+///
+/// 删除所有浏览器槽位并将已使用计数重置为 0，记录审计日志。
 pub async fn reset_handler(
     path: web::Path<String>,
     form: web::Form<ActionForm>,
@@ -296,6 +339,9 @@ pub async fn reset_handler(
         .finish()
 }
 
+/// 编辑二维码页面（GET `/edit/{uuid}`）。
+///
+/// 加载二维码记录和已解析的分段列表，渲染编辑表单。
 pub async fn edit_page(
     path: web::Path<String>,
     tmpl: web::Data<Tera>,
@@ -330,6 +376,9 @@ pub async fn edit_page(
     render_template(&tmpl, "edit.html", &ctx)
 }
 
+/// 编辑二维码处理（POST `/edit/{uuid}`）。
+///
+/// 校验 CSRF 和文本内容后更新记录，记录审计日志。
 pub async fn edit_handler(
     path: web::Path<String>,
     form: web::Form<CreateForm>,
@@ -390,6 +439,10 @@ pub async fn edit_handler(
         .finish()
 }
 
+/// 提取日志页面（GET `/logs/{uuid}`）。
+///
+/// 显示指定二维码的所有提取记录，支持分页。
+/// 同时保留列表页的分页和搜索状态，以便用户返回时恢复。
 pub async fn extract_logs_page(
     path: web::Path<String>,
     tmpl: web::Data<Tera>,
@@ -438,8 +491,13 @@ pub async fn extract_logs_page(
     render_template(&tmpl, "logs.html", &ctx)
 }
 
-// ---- AI 评论生成 ----
+// ============================================================================
+// AI 评论生成
+// ============================================================================
 
+/// AI 评论生成页面（GET `/ai-generate`）。
+///
+/// 仅在配置了 AI 服务时可用，否则返回 404。
 pub async fn ai_generate_page(
     tmpl: web::Data<Tera>,
     session: Session,
@@ -470,6 +528,10 @@ pub async fn ai_generate_page(
     render_template(&tmpl, "ai_generate.html", &ctx)
 }
 
+/// AI 评论生成接口（POST `/ai-generate`，JSON 请求）。
+///
+/// 调用 AI 服务生成评论列表，返回 JSON 响应。
+/// 生成数量限制在 1-50 条之间。
 pub async fn ai_generate_handler(
     body: web::Json<AiGenerateRequest>,
     session: Session,
@@ -509,6 +571,9 @@ pub async fn ai_generate_handler(
     }
 }
 
+/// AI 生成内容创建二维码处理（POST `/ai-generate/create`）。
+///
+/// 将 AI 生成的评论列表作为二维码文本内容创建新记录。
 pub async fn ai_create_handler(
     form: web::Form<AiCreateForm>,
     tmpl: web::Data<Tera>,
@@ -537,6 +602,7 @@ pub async fn ai_create_handler(
         }
     };
 
+    // AI 创建时默认 max_count 等于分段数量
     let max_count = form
         .max_count
         .unwrap_or(segments.len() as u32)
@@ -571,8 +637,13 @@ pub async fn ai_create_handler(
     }
 }
 
-// ---- 审计日志 ----
+// ============================================================================
+// 审计日志（仅超级管理员）
+// ============================================================================
 
+/// 审计日志页面（GET `/audit-logs`）。
+///
+/// 仅超级管理员可访问。支持按操作类型和关键词筛选，分页显示。
 pub async fn audit_logs_page(
     tmpl: web::Data<Tera>,
     pool: web::Data<MySqlPool>,
@@ -582,6 +653,7 @@ pub async fn audit_logs_page(
 ) -> HttpResponse {
     let base = &config.server.context_path;
 
+    // 权限检查：仅超级管理员
     if !is_super_admin(&session) {
         return render_error(
             &tmpl,
@@ -619,8 +691,13 @@ pub async fn audit_logs_page(
     render_template(&tmpl, "audit_logs.html", &ctx)
 }
 
-// ---- 用户管理 (super admin only) ----
+// ============================================================================
+// 用户管理（仅超级管理员）
+// ============================================================================
 
+/// 用户管理页面（GET `/users`）。
+///
+/// 仅超级管理员可访问，显示所有数据库管理员用户列表。
 pub async fn users_page(
     tmpl: web::Data<Tera>,
     pool: web::Data<MySqlPool>,
@@ -659,6 +736,9 @@ pub async fn users_page(
     render_template(&tmpl, "users.html", &ctx)
 }
 
+/// 创建管理员用户处理（POST `/users/create`）。
+///
+/// 仅超级管理员可操作。校验 CSRF 后创建用户，记录审计日志。
 pub async fn create_user_handler(
     form: web::Form<CreateUserForm>,
     tmpl: web::Data<Tera>,
@@ -712,6 +792,9 @@ pub async fn create_user_handler(
         .finish()
 }
 
+/// 切换用户启用/禁用状态处理（POST `/users/toggle`）。
+///
+/// 仅超级管理员可操作。同时重置目标用户的登录失败计数和锁定状态。
 pub async fn toggle_user_handler(
     form: web::Form<ToggleUserForm>,
     tmpl: web::Data<Tera>,
@@ -769,8 +852,14 @@ pub async fn toggle_user_handler(
         .finish()
 }
 
-// ---- 修改密码 (admin users only) ----
+// ============================================================================
+// 修改密码（仅数据库管理员）
+// ============================================================================
 
+/// 修改密码页面（GET `/change-password`）。
+///
+/// 仅数据库管理员（role=admin）可访问。
+/// 超级管理员的密码通过配置文件管理，不支持在线修改。
 pub async fn change_password_page(
     tmpl: web::Data<Tera>,
     session: Session,
@@ -779,7 +868,7 @@ pub async fn change_password_page(
     let base = &config.server.context_path;
     let role = get_session_role(&session);
 
-    // Only DB admins can change password (super admin uses config file)
+    // 超级管理员不支持在线改密
     if role != "admin" {
         return render_error(
             &tmpl,
@@ -803,6 +892,10 @@ pub async fn change_password_page(
     render_template(&tmpl, "change_password.html", &ctx)
 }
 
+/// 修改密码处理（POST `/change-password`）。
+///
+/// 仅数据库管理员可操作。验证旧密码后更新为新密码，
+/// 成功后清除会话强制重新登录。
 pub async fn change_password_handler(
     form: web::Form<ChangePasswordForm>,
     tmpl: web::Data<Tera>,
@@ -853,7 +946,7 @@ pub async fn change_password_handler(
                 &client_ip,
             )
             .await;
-            // Purge session so user must re-login
+            // 密码修改成功后清除会话，强制重新登录
             session.purge();
             HttpResponse::Found()
                 .insert_header(("Location", format!("{base}/login")))
