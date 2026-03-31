@@ -1,3 +1,11 @@
+//! 认证路由处理模块
+//!
+//! 处理用户登录和登出请求。登录支持双重认证源：
+//! 1. 配置文件中的超级管理员（role=super）
+//! 2. 数据库中的普通管理员（role=admin）
+//!
+//! 安全机制：CSRF 令牌验证、IP 限流、bcrypt 密码验证。
+
 use actix_session::Session;
 use actix_web::{web, HttpRequest, HttpResponse};
 use serde::Deserialize;
@@ -9,20 +17,31 @@ use crate::rate_limit::RateLimiter;
 use crate::services;
 use crate::utils::validation::get_client_ip;
 
+/// 用户名最大长度限制
 const MAX_USERNAME_LEN: usize = 100;
+/// 密码最大长度限制
 const MAX_PASSWORD_LEN: usize = 200;
 
+/// 校验登录表单输入长度，防止超大输入消耗资源。
 pub(crate) fn validate_login_input_length(username: &str, password: &str) -> bool {
     username.len() <= MAX_USERNAME_LEN && password.len() <= MAX_PASSWORD_LEN
 }
 
+/// 登录表单数据
 #[derive(Deserialize)]
 pub struct LoginForm {
+    /// 用户名
     pub username: String,
+    /// 密码
     pub password: String,
+    /// CSRF 防护令牌
     pub csrf_token: String,
 }
 
+/// 登录页面（GET）。
+///
+/// 已登录用户自动重定向到首页。
+/// 根据查询参数显示错误提示（`error=1` 凭证错误，`error=rate` 限流）。
 pub async fn login_page(
     tmpl: web::Data<Tera>,
     session: Session,
@@ -31,6 +50,7 @@ pub async fn login_page(
 ) -> HttpResponse {
     let base = &config.server.context_path;
 
+    // 已登录用户重定向到首页
     if session.get::<String>("user").unwrap_or(None).is_some() {
         return HttpResponse::Found()
             .insert_header(("Location", format!("{base}/")))
@@ -42,6 +62,7 @@ pub async fn login_page(
     let mut ctx = Context::new();
     ctx.insert("base", base);
     ctx.insert("csrf_token", &csrf_token);
+    // 根据查询参数设置错误提示
     let query = req.query_string();
     if query.contains("error=1") {
         ctx.insert("error", &"用户名或密码错误");
@@ -58,6 +79,15 @@ pub async fn login_page(
     }
 }
 
+/// 登录请求处理（POST）。
+///
+/// 处理流程：
+/// 1. 输入长度校验
+/// 2. CSRF 令牌验证
+/// 3. IP 限流检查
+/// 4. 尝试配置文件超级管理员认证
+/// 5. 回退到数据库管理员认证
+/// 6. 记录审计日志
 pub async fn login_handler(
     form: web::Form<LoginForm>,
     session: Session,
@@ -69,18 +99,21 @@ pub async fn login_handler(
     let base = &config.server.context_path;
     let client_ip = get_client_ip(&req);
 
+    // ---- 输入校验 ----
     if !validate_login_input_length(&form.username, &form.password) {
         return HttpResponse::Found()
             .insert_header(("Location", format!("{base}/login?error=1")))
             .finish();
     }
 
+    // ---- CSRF 验证 ----
     if !csrf::validate_csrf_token(&session, &form.csrf_token) {
         return HttpResponse::Found()
             .insert_header(("Location", format!("{base}/login?error=1")))
             .finish();
     }
 
+    // ---- IP 限流检查 ----
     if !rate_limiter.check_and_increment(&client_ip) {
         log::warn!("Login rate limited");
         return HttpResponse::Found()
@@ -88,7 +121,7 @@ pub async fn login_handler(
             .finish();
     }
 
-    // 1. Try config-file super admin first
+    // ---- 认证源 1：配置文件超级管理员 ----
     if form.username == config.admin.username
         && bcrypt::verify(&form.password, &config.admin.password_hash).unwrap_or(false)
     {
@@ -112,7 +145,7 @@ pub async fn login_handler(
             .finish();
     }
 
-    // 2. Try database admin users
+    // ---- 认证源 2：数据库管理员 ----
     match services::user::verify_db_user(pool.get_ref(), &form.username, &form.password).await {
         Ok(Some(username)) => {
             if let Err(e) = session.insert("user", &username) {
@@ -135,7 +168,7 @@ pub async fn login_handler(
                 .finish()
         }
         Ok(None) => {
-            // User not found in either config or DB
+            // 用户在配置文件和数据库中均不存在
             services::audit::log_action(
                 pool.get_ref(),
                 &form.username,
@@ -150,7 +183,7 @@ pub async fn login_handler(
                 .finish()
         }
         Err(msg) => {
-            // Account locked/disabled
+            // 账户已锁定或已禁用
             services::audit::log_action(
                 pool.get_ref(),
                 &form.username,
@@ -167,6 +200,9 @@ pub async fn login_handler(
     }
 }
 
+/// 登出处理（GET）。
+///
+/// 清除会话数据并重定向到登录页面。
 pub async fn logout(
     session: Session,
     config: web::Data<Config>,

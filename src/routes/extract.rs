@@ -1,3 +1,8 @@
+//! 公开提取路由处理模块
+//!
+//! 处理二维码内容的公开提取请求，无需登录即可访问。
+//! 包含提取页面渲染（GET）和槽位领取接口（POST JSON）。
+
 use actix_web::{web, HttpRequest, HttpResponse};
 use sqlx::MySqlPool;
 use tera::{Context, Tera};
@@ -9,18 +14,29 @@ use crate::utils::crypto::*;
 use crate::utils::render::*;
 use crate::utils::validation::get_client_ip;
 
+/// 校验 browser_id 格式。
+///
+/// 要求：长度不超过 36 字符，仅包含字母、数字和连字符。
+/// 返回去除首尾空白后的 browser_id。
 pub(crate) fn validate_browser_id(browser_id: &str) -> Result<String, &'static str> {
     if browser_id.len() > 36 {
         return Err("invalid browser_id");
     }
     let trimmed = browser_id.trim().to_string();
-    if trimmed.is_empty() || !trimmed.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+    if trimmed.is_empty()
+        || !trimmed
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-')
+    {
         return Err("invalid browser_id");
     }
     Ok(trimmed)
 }
 
-/// Extract landing page (GET): validates HMAC and UUID, renders skeleton for AJAX
+/// 提取页面（GET `/extract/{uuid}/{hash}`）。
+///
+/// 验证 HMAC 签名和二维码存在性后，渲染提取页面骨架。
+/// 实际内容通过 AJAX 调用 `/claim` 接口获取。
 pub async fn extract_page(
     path: web::Path<(String, String)>,
     tmpl: web::Data<Tera>,
@@ -32,6 +48,7 @@ pub async fn extract_page(
     let legacy_support = config.server.legacy_hash_support.unwrap_or(true);
     log::debug!("Extract page visited");
 
+    // 验证 HMAC 签名
     if !verify_extract_hash(&uuid, &hash, &config.server.extract_salt, legacy_support) {
         return render_error(
             &tmpl,
@@ -41,6 +58,7 @@ pub async fn extract_page(
         );
     }
 
+    // 检查二维码是否存在
     let exists: Option<u64> = db_try!(
         services::extract::check_exists(pool.get_ref(), &uuid).await,
         &tmpl,
@@ -64,8 +82,10 @@ pub async fn extract_page(
     render_template(&tmpl, "extract.html", &ctx)
 }
 
-/// Claim a slot (POST /extract/{uuid}/{hash}/claim)
-/// Each browser_id gets one segment sequentially
+/// 领取槽位接口（POST `/extract/{uuid}/{hash}/claim`）。
+///
+/// 接收 JSON 请求体 `{ "browser_id": "..." }`，为该浏览器分配一个文本分段。
+/// 返回 JSON 响应，包含状态和分配的内容。
 pub async fn extract_claim_handler(
     path: web::Path<(String, String)>,
     body: web::Json<crate::models::ClaimRequest>,
@@ -76,11 +96,13 @@ pub async fn extract_claim_handler(
     let (uuid, hash) = path.into_inner();
     let legacy_support = config.server.legacy_hash_support.unwrap_or(true);
 
+    // 验证 HMAC 签名
     if !verify_extract_hash(&uuid, &hash, &config.server.extract_salt, legacy_support) {
         return HttpResponse::BadRequest()
             .json(serde_json::json!({"status": "error", "message": "invalid hash"}));
     }
 
+    // 校验 browser_id 格式
     let browser_id = match validate_browser_id(&body.browser_id) {
         Ok(id) => id,
         Err(_) => {
@@ -91,6 +113,7 @@ pub async fn extract_claim_handler(
 
     let client_ip = get_client_ip(&req);
 
+    // 调用服务层领取槽位
     match services::extract::claim_slot(pool.get_ref(), &uuid, &browser_id, &client_ip).await {
         Ok(response) => {
             if response.status == "not_found" {

@@ -1,3 +1,8 @@
+//! 路由配置模块
+//!
+//! 注册所有 HTTP 路由并绑定到对应的处理函数。
+//! 所有路由以 `context_path` 为前缀，支持虚拟目录部署。
+
 pub mod admin;
 pub mod auth;
 pub mod extract;
@@ -5,10 +10,18 @@ pub mod extract;
 use actix_files as fs;
 use actix_web::web;
 
+/// 配置所有路由，返回闭包供 `App::configure()` 使用。
+///
+/// 注册的路由分为三组：
+/// - **管理路由**（需认证）：二维码 CRUD、AI 生成、用户管理、审计日志、密码修改
+/// - **公开路由**（无需认证）：提取页面和领取接口
+/// - **认证路由**：登录、登出
+/// - **静态资源**：`/static/` 目录，启用 ETag 和 Last-Modified 缓存
 pub fn configure(context_path: String) -> impl FnOnce(&mut web::ServiceConfig) {
     move |cfg: &mut web::ServiceConfig| {
         cfg.service(
             web::scope(&context_path)
+                // ---- 管理路由 ----
                 .route("/", web::get().to(admin::list_page))
                 .route("/create", web::get().to(admin::create_page))
                 .route("/create", web::post().to(admin::create_handler))
@@ -44,9 +57,11 @@ pub fn configure(context_path: String) -> impl FnOnce(&mut web::ServiceConfig) {
                     "/change-password",
                     web::post().to(admin::change_password_handler),
                 )
+                // ---- 认证路由 ----
                 .route("/login", web::get().to(auth::login_page))
                 .route("/login", web::post().to(auth::login_handler))
                 .route("/logout", web::get().to(auth::logout))
+                // ---- 静态资源 ----
                 .service(
                     fs::Files::new("/static", "static")
                         .use_etag(true)
