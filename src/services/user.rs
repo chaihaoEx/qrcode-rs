@@ -1,8 +1,16 @@
+//! 用户管理服务
+//!
+//! 提供管理员用户的 CRUD 操作、密码管理和登录凭证验证。
+//! 包含用户名和密码的格式校验、bcrypt 加密、账户锁定机制。
+
 use chrono::NaiveDateTime;
 use sqlx::MySqlPool;
 
 use crate::models::AdminUser;
 
+/// 校验用户名格式：去除首尾空白后长度需在 1-100 字符之间。
+///
+/// 返回去除空白后的用户名，或格式错误的提示信息。
 pub(crate) fn validate_username(username: &str) -> Result<String, String> {
     let trimmed = username.trim();
     if trimmed.is_empty() || trimmed.len() > 100 {
@@ -11,6 +19,9 @@ pub(crate) fn validate_username(username: &str) -> Result<String, String> {
     Ok(trimmed.to_string())
 }
 
+/// 校验密码长度：需在 8-200 字符之间。
+///
+/// `label` 参数用于生成友好的错误提示（如 "密码" 或 "新密码"）。
 pub(crate) fn validate_password(password: &str, label: &str) -> Result<(), String> {
     if password.len() < 8 || password.len() > 200 {
         return Err(format!("{label}长度需在 8-200 字符之间"));
@@ -18,14 +29,17 @@ pub(crate) fn validate_password(password: &str, label: &str) -> Result<(), Strin
     Ok(())
 }
 
-/// List all admin users.
+/// 查询所有管理员用户列表，按创建时间升序排列。
 pub async fn list_users(pool: &MySqlPool) -> Result<Vec<AdminUser>, sqlx::Error> {
     sqlx::query_as::<_, AdminUser>("SELECT * FROM admin_users ORDER BY created_at ASC")
         .fetch_all(pool)
         .await
 }
 
-/// Create a new admin user. Returns error message on failure.
+/// 创建新的管理员用户。
+///
+/// 校验用户名和密码格式后，使用 bcrypt（cost=12）加密密码并写入数据库。
+/// 如果用户名已存在，返回友好的错误提示。
 pub async fn create_user(pool: &MySqlPool, username: &str, password: &str) -> Result<(), String> {
     let username = validate_username(username)?;
     validate_password(password, "密码")?;
@@ -48,7 +62,9 @@ pub async fn create_user(pool: &MySqlPool, username: &str, password: &str) -> Re
     Ok(())
 }
 
-/// Toggle user active status.
+/// 切换用户的启用/禁用状态。
+///
+/// 同时重置失败登录次数和锁定时间，确保重新启用的用户可以立即登录。
 pub async fn toggle_user(pool: &MySqlPool, id: u32, is_active: bool) -> Result<(), sqlx::Error> {
     sqlx::query("UPDATE admin_users SET is_active = ?, failed_attempts = 0, locked_until = NULL WHERE id = ?")
         .bind(is_active)
@@ -58,7 +74,10 @@ pub async fn toggle_user(pool: &MySqlPool, id: u32, is_active: bool) -> Result<(
     Ok(())
 }
 
-/// Change password for a DB user. Verifies old password first.
+/// 修改数据库用户的密码。
+///
+/// 先验证旧密码正确性，然后用 bcrypt 加密新密码并更新。
+/// 仅限数据库用户使用（超级管理员通过配置文件管理密码）。
 pub async fn change_password(
     pool: &MySqlPool,
     username: &str,
@@ -67,6 +86,7 @@ pub async fn change_password(
 ) -> Result<(), String> {
     validate_password(new_password, "新密码")?;
 
+    // 查询用户并验证旧密码
     let user = sqlx::query_as::<_, AdminUser>("SELECT * FROM admin_users WHERE username = ?")
         .bind(username)
         .fetch_optional(pool)
@@ -78,6 +98,7 @@ pub async fn change_password(
         return Err("旧密码错误".to_string());
     }
 
+    // 加密新密码并更新
     let new_hash = bcrypt::hash(new_password, 12).map_err(|e| format!("密码加密失败: {e}"))?;
 
     sqlx::query("UPDATE admin_users SET password_hash = ? WHERE username = ?")
@@ -90,9 +111,16 @@ pub async fn change_password(
     Ok(())
 }
 
-/// Verify a database user's credentials for login.
-/// Returns Ok(Some(username)) on success, Ok(None) if user not found,
-/// or Err with a message explaining why login failed (locked, inactive, wrong password).
+/// 验证数据库用户的登录凭证。
+///
+/// 返回值说明：
+/// - `Ok(Some(username))` — 登录成功
+/// - `Ok(None)` — 用户不存在（由调用方回退到其他认证方式）
+/// - `Err(message)` — 登录失败（账户禁用、锁定或密码错误）
+///
+/// 登录失败处理：
+/// - 累计失败次数，达到 5 次后锁定账户 30 分钟
+/// - 登录成功时重置失败次数和锁定状态
 pub async fn verify_db_user(
     pool: &MySqlPool,
     username: &str,
@@ -111,11 +139,12 @@ pub async fn verify_db_user(
         }
     };
 
+    // ---- 账户状态检查 ----
     if !user.is_active {
         return Err("账户已被禁用".to_string());
     }
 
-    // Check if locked
+    // 检查是否处于锁定期
     if let Some(locked_until) = user.locked_until {
         let now = chrono::Utc::now().naive_utc();
         if now < locked_until {
@@ -123,8 +152,9 @@ pub async fn verify_db_user(
         }
     }
 
+    // ---- 密码验证 ----
     if bcrypt::verify(password, &user.password_hash).unwrap_or(false) {
-        // Reset failed attempts on success
+        // 验证成功：重置失败计数
         let _ = sqlx::query(
             "UPDATE admin_users SET failed_attempts = 0, locked_until = NULL WHERE id = ?",
         )
@@ -133,9 +163,10 @@ pub async fn verify_db_user(
         .await;
         Ok(Some(user.username))
     } else {
-        // Increment failed attempts
+        // 验证失败：递增失败次数，达到阈值则锁定
         let new_attempts = user.failed_attempts + 1;
         if new_attempts >= 5 {
+            // 锁定 30 分钟
             let lock_until: NaiveDateTime =
                 chrono::Utc::now().naive_utc() + chrono::Duration::minutes(30);
             let _ = sqlx::query(

@@ -1,9 +1,17 @@
+//! 二维码 CRUD 与图片生成服务
+//!
+//! 提供二维码记录的增删改查、提取日志查询和二维码图片生成功能。
+//! 图片生成支持蓝紫渐变色彩、模块间隙和备注文字绘制。
+
 use sqlx::MySqlPool;
 
 use crate::models::{ExtractLog, QrCodeRecord};
 use crate::utils::PAGE_SIZE;
 
-/// List QR codes with optional keyword search, returns (total, records).
+/// 查询二维码列表，支持按关键词搜索，返回 `(总数, 记录列表)`。
+///
+/// 关键词同时匹配 `text_content` 和 `remark` 字段（LIKE 模糊搜索）。
+/// 结果按创建时间倒序排列，支持分页。
 pub async fn list_qrcodes(
     pool: &MySqlPool,
     keyword: &str,
@@ -24,8 +32,7 @@ pub async fn list_qrcodes(
 
         Ok((total, records))
     } else {
-        // Note: %keyword% LIKE on TEXT column cannot use index.
-        // At current scale this is acceptable; consider full-text search if data grows large.
+        // LIKE 模糊搜索：在当前数据规模下可接受，数据量大时考虑全文索引
         let like_pattern = format!("%{keyword}%");
 
         let total: i64 = sqlx::query_scalar(
@@ -50,7 +57,7 @@ pub async fn list_qrcodes(
     }
 }
 
-/// Fetch a single QR code by UUID.
+/// 根据 UUID 查询单条二维码记录。
 pub async fn get_by_uuid(
     pool: &MySqlPool,
     uuid: &str,
@@ -61,7 +68,12 @@ pub async fn get_by_uuid(
         .await
 }
 
-/// Create a new QR code, returns the generated UUID.
+/// 创建新的二维码记录，返回生成的 UUID。
+///
+/// # 参数
+/// - `text_content_json` - JSON 数组格式的文本分段（如 `["段落1", "段落2"]`）
+/// - `remark` - 备注信息（可选）
+/// - `max_count` - 最大提取次数
 pub async fn create(
     pool: &MySqlPool,
     text_content_json: &str,
@@ -83,7 +95,7 @@ pub async fn create(
     Ok(uuid)
 }
 
-/// Update an existing QR code.
+/// 更新已有的二维码记录。
 pub async fn update(
     pool: &MySqlPool,
     uuid: &str,
@@ -102,7 +114,9 @@ pub async fn update(
     Ok(())
 }
 
-/// Delete a QR code by UUID.
+/// 根据 UUID 删除二维码记录。
+///
+/// 关联的 `qr_browser_slots` 和 `qr_extract_logs` 通过外键级联删除。
 pub async fn delete(pool: &MySqlPool, uuid: &str) -> Result<(), sqlx::Error> {
     sqlx::query("DELETE FROM qr_codes WHERE uuid = ?")
         .bind(uuid)
@@ -112,10 +126,13 @@ pub async fn delete(pool: &MySqlPool, uuid: &str) -> Result<(), sqlx::Error> {
     Ok(())
 }
 
-/// Reset slots for a QR code (delete browser slots and reset used_count).
+/// 重置二维码的提取状态：删除所有浏览器槽位并将 `used_count` 重置为 0。
+///
+/// 在事务中执行，确保槽位删除和计数重置的原子性。
 pub async fn reset_slots(pool: &MySqlPool, uuid: &str) -> Result<(), sqlx::Error> {
     let mut tx = pool.begin().await?;
 
+    // 删除关联的浏览器槽位记录
     sqlx::query(
         "DELETE FROM qr_browser_slots WHERE qrcode_id = (SELECT id FROM qr_codes WHERE uuid = ?)",
     )
@@ -123,6 +140,7 @@ pub async fn reset_slots(pool: &MySqlPool, uuid: &str) -> Result<(), sqlx::Error
     .execute(&mut *tx)
     .await?;
 
+    // 重置已使用计数
     sqlx::query("UPDATE qr_codes SET used_count = 0 WHERE uuid = ?")
         .bind(uuid)
         .execute(&mut *tx)
@@ -132,7 +150,9 @@ pub async fn reset_slots(pool: &MySqlPool, uuid: &str) -> Result<(), sqlx::Error
     Ok(())
 }
 
-/// List extract logs for a QR code, returns (total, logs).
+/// 查询指定二维码的提取日志列表，返回 `(总数, 日志列表)`。
+///
+/// 结果按提取时间倒序排列，支持分页。
 pub async fn list_extract_logs(
     pool: &MySqlPool,
     qrcode_id: u64,
@@ -155,39 +175,45 @@ pub async fn list_extract_logs(
     Ok((total, logs))
 }
 
-/// Check if a character is an emoji or emoji-related symbol.
+/// 判断字符是否为 emoji 或 emoji 相关的特殊符号。
+///
+/// 用于在绘制二维码备注文字前过滤掉 emoji 字符，
+/// 因为系统 CJK 字体通常不包含 emoji 字形，会导致渲染异常。
 fn is_emoji(c: char) -> bool {
     let cp = c as u32;
     matches!(cp,
-        0x200D |                    // Zero-width joiner
-        0xFE0F |                    // Variation selector-16
-        0x20E3 |                    // Combining enclosing keycap
-        0x2600..=0x27BF |           // Misc symbols, dingbats
-        0x2B50..=0x2B55 |           // Stars, circles
-        0xFE00..=0xFE0F |          // Variation selectors
-        0x1F000..=0x1FAFF |         // Mahjong, dominos, emoji block
-        0xE0020..=0xE007F |         // Tags
-        0x200B..=0x200F |           // Zero-width spaces
-        0x2028..=0x202F |           // Line/paragraph separators
-        0x2060..=0x206F |           // Invisible formatters
-        0xE0001..=0xE007F           // Language tags
+        0x200D |                    // 零宽连接符
+        0xFE0F |                    // 变体选择符-16
+        0x20E3 |                    // 组合包围键帽
+        0x2600..=0x27BF |           // 杂项符号、装饰符号
+        0x2B50..=0x2B55 |           // 星星、圆圈
+        0xFE00..=0xFE0F |          // 变体选择符
+        0x1F000..=0x1FAFF |         // 麻将、骰子、emoji 区块
+        0xE0020..=0xE007F |         // 标签字符
+        0x200B..=0x200F |           // 零宽空格
+        0x2028..=0x202F |           // 行/段落分隔符
+        0x2060..=0x206F |           // 不可见格式化字符
+        0xE0001..=0xE007F           // 语言标签
     )
 }
 
-/// Try to load a CJK-capable font from common system paths.
+/// 尝试从系统常见路径加载支持 CJK 的字体文件。
+///
+/// 按优先级依次尝试 macOS 和 Linux 的常见字体路径，
+/// 最后回退到项目本地的字体文件。不嵌入字体文件以保持二进制体积。
 fn load_system_font() -> Result<Vec<u8>, String> {
     let candidates = [
-        // macOS
+        // macOS 系统字体
         "/System/Library/Fonts/PingFang.ttc",
         "/System/Library/Fonts/STHeiti Medium.ttc",
         "/System/Library/Fonts/Hiragino Sans GB.ttc",
-        // Linux common paths
+        // Linux 常见字体路径
         "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/google-noto-cjk/NotoSansCJKsc-Regular.otf",
         "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
-        // Fallback: project-local font if present
+        // 回退：项目本地字体
         "static/fonts/LXGWWenKaiScreen-Regular.ttf",
     ];
     for path in &candidates {
@@ -204,31 +230,43 @@ fn load_system_font() -> Result<Vec<u8>, String> {
     )
 }
 
-/// Generate a styled QR code PNG image from a URL.
-/// If `remark` is provided, the remark text is drawn below the QR code.
+/// 生成带样式的二维码 PNG 图片。
+///
+/// 图片特性：
+/// - 蓝色→紫色对角线渐变色彩
+/// - 模块间留有间隙，呈现圆润风格
+/// - 白色内边距
+/// - 可选在底部绘制备注文字（自动过滤 emoji、超长截断、水平居中）
+///
+/// # 参数
+/// - `url` - 编码到二维码中的 URL 内容
+/// - `remark` - 可选的备注文字，绘制在二维码下方
 pub fn generate_qr_image(url: &str, remark: Option<&str>) -> Result<Vec<u8>, String> {
     use ab_glyph::{Font as AbFont, FontRef, PxScale, ScaleFont};
     use image::{ImageEncoder, Rgba, RgbaImage};
     use imageproc::drawing::{draw_filled_rect_mut, draw_text_mut};
     use imageproc::rect::Rect;
 
-    // Gradient colors: top-left → bottom-right
-    let color_start: [u8; 3] = [59, 130, 246]; // blue-500 #3b82f6
-    let color_end: [u8; 3] = [168, 85, 247]; // purple-500 #a855f7
-    let bg_color = Rgba([255u8, 255, 255, 255]);
-    let text_color = Rgba([71u8, 85, 105, 255]); // --gray-600: #475569
+    // ---- 颜色和尺寸常量 ----
+    let color_start: [u8; 3] = [59, 130, 246]; // 渐变起始色 blue-500 #3b82f6
+    let color_end: [u8; 3] = [168, 85, 247]; // 渐变结束色 purple-500 #a855f7
+    let bg_color = Rgba([255u8, 255, 255, 255]); // 白色背景
+    let text_color = Rgba([71u8, 85, 105, 255]); // 备注文字色 gray-600
 
-    let padding = 24u32; // white padding around QR
-    let module_size = 8u32; // pixels per QR module
-    let module_gap = 1u32; // gap between modules for rounded look
+    let padding = 24u32; // 二维码周围的白色内边距
+    let module_size = 8u32; // 每个 QR 模块的像素大小
+    let module_gap = 1u32; // 模块间隙（营造圆润效果）
 
+    // ---- 生成 QR 矩阵 ----
     let qr = qrcode::QrCode::new(url.as_bytes())
         .map_err(|e| format!("Failed to generate QR code: {e}"))?;
 
-    let modules = qr.width() as u32; // number of modules per side
+    let modules = qr.width() as u32; // 每边的模块数量
     let qr_area = modules * module_size;
     let content_w = qr_area + padding * 2;
 
+    // ---- 处理备注文字 ----
+    // 过滤 emoji 字符（系统 CJK 字体不含 emoji 字形）
     let remark = remark
         .map(|s| s.chars().filter(|c| !is_emoji(*c)).collect::<String>())
         .filter(|s| !s.trim().is_empty());
@@ -237,13 +275,13 @@ pub fn generate_qr_image(url: &str, remark: Option<&str>) -> Result<Vec<u8>, Str
 
     let mut canvas = RgbaImage::from_pixel(content_w, canvas_h, bg_color);
 
-    // Draw QR modules with gradient color (diagonal: top-left → bottom-right)
+    // ---- 绘制 QR 模块（对角线渐变） ----
     let colors = qr.to_colors();
     for row in 0..modules {
         for col in 0..modules {
             let idx = (row * modules + col) as usize;
             if colors[idx] == qrcode::Color::Dark {
-                // Interpolation factor based on diagonal position
+                // 根据对角线位置计算渐变插值因子
                 let t = ((row as f32 + col as f32) / (modules as f32 * 2.0 - 2.0)).min(1.0);
                 let r = (color_start[0] as f32 * (1.0 - t) + color_end[0] as f32 * t) as u8;
                 let g = (color_start[1] as f32 * (1.0 - t) + color_end[1] as f32 * t) as u8;
@@ -261,7 +299,7 @@ pub fn generate_qr_image(url: &str, remark: Option<&str>) -> Result<Vec<u8>, Str
         }
     }
 
-    // Draw remark text if present
+    // ---- 绘制备注文字 ----
     if let Some(remark_text) = remark {
         let font_data = load_system_font()?;
         let font = FontRef::try_from_slice(&font_data)
@@ -270,7 +308,7 @@ pub fn generate_qr_image(url: &str, remark: Option<&str>) -> Result<Vec<u8>, Str
         let scale = PxScale::from(18.0);
         let scaled_font = font.as_scaled(scale);
 
-        // Truncate if too long
+        // 超长文字截断：保留能完整显示的字符 + "..."
         let max_width = (content_w - padding * 2) as f32;
         let mut display_remark = String::new();
         let mut current_width: f32 = 0.0;
@@ -291,7 +329,6 @@ pub fn generate_qr_image(url: &str, remark: Option<&str>) -> Result<Vec<u8>, Str
             display_remark.push(c);
         }
         if !truncated {
-            // recalculate without ellipsis reserve
             current_width = display_remark
                 .chars()
                 .map(|c| scaled_font.h_advance(scaled_font.glyph_id(c)))
@@ -303,6 +340,7 @@ pub fn generate_qr_image(url: &str, remark: Option<&str>) -> Result<Vec<u8>, Str
                 .sum();
         }
 
+        // 文字水平居中
         let text_x = (((content_w as f32) - current_width) / 2.0).max(padding as f32) as i32;
         let text_y = (padding + qr_area + 10) as i32;
 
@@ -317,6 +355,7 @@ pub fn generate_qr_image(url: &str, remark: Option<&str>) -> Result<Vec<u8>, Str
         );
     }
 
+    // ---- 编码为 PNG ----
     let mut buf = std::io::Cursor::new(Vec::new());
     let encoder = image::codecs::png::PngEncoder::new(&mut buf);
     encoder
