@@ -1,10 +1,16 @@
+//! 输入校验与文本处理模块
+//!
+//! 提供客户端 IP 提取、文本内容分段解析、显示截断和分段校验等工具函数。
+//! 所有校验规则均在此模块集中定义，供路由层和服务层调用。
+
 use actix_web::HttpRequest;
 
 use super::MAX_CONTENT_LENGTH;
 
-/// Extract client IP from request, truncated to max 45 chars (IPv6 max length).
-/// Binds `ConnectionInfo` to a local variable so the `&str` borrow remains valid,
-/// then slices before allocating to avoid CodeQL "uncontrolled allocation" warnings.
+/// 从 HTTP 请求中提取客户端 IP 地址。
+///
+/// 优先使用 `X-Forwarded-For` 等代理头（由 actix 的 `ConnectionInfo` 处理），
+/// 截断到最大 45 个字符（IPv6 最大长度），避免非法超长输入。
 pub fn get_client_ip(req: &HttpRequest) -> String {
     let info = req.connection_info();
     let raw = info.realip_remote_addr().unwrap_or("unknown");
@@ -12,7 +18,10 @@ pub fn get_client_ip(req: &HttpRequest) -> String {
     raw[..end].to_string()
 }
 
-/// Parse text_content into segments. Falls back to single segment if not JSON array.
+/// 将文本内容解析为分段列表。
+///
+/// 尝试按 JSON 数组格式解析；如果失败或结果为空数组，
+/// 则将整个文本作为单个分段返回。
 pub fn parse_segments(text_content: &str) -> Vec<String> {
     match serde_json::from_str::<Vec<String>>(text_content) {
         Ok(segments) if !segments.is_empty() => segments,
@@ -20,7 +29,9 @@ pub fn parse_segments(text_content: &str) -> Vec<String> {
     }
 }
 
-/// Truncate display: first 12 chars of first segment + "..."
+/// 截断文本用于列表页显示：取第一个分段的前 12 个字符，超出部分用 `"..."` 表示。
+///
+/// 换行符会被替换为空格，确保在单行内正常显示。
 pub fn truncate_display(text_content: &str) -> String {
     let segments = parse_segments(text_content);
     let first = segments.first().map(|s| s.as_str()).unwrap_or("");
@@ -33,10 +44,17 @@ pub fn truncate_display(text_content: &str) -> String {
     }
 }
 
-/// Validate and parse segments from form input.
-/// Returns (segments, json_string) or an error message.
+/// 校验并解析表单提交的文本内容为分段列表。
+///
+/// 处理流程：
+/// 1. 尝试按 JSON 数组解析，对每个分段去除首尾空白并过滤空字符串
+/// 2. 如果不是 JSON 数组，将整段文本作为单个分段
+/// 3. 校验分段不为空且总长度不超过 `MAX_CONTENT_LENGTH`
+///
+/// 返回 `(segments, json_string)` 元组，或错误信息。
 pub fn validate_segments(raw: &str) -> Result<(Vec<String>, String), &'static str> {
     let text_content = raw.trim();
+    // 尝试 JSON 数组解析，失败则回退到纯文本单分段
     let segments: Vec<String> = match serde_json::from_str::<Vec<String>>(text_content) {
         Ok(segs) => segs
             .into_iter()
@@ -53,10 +71,12 @@ pub fn validate_segments(raw: &str) -> Result<(Vec<String>, String), &'static st
         }
     };
 
+    // 校验：内容不能为空
     if segments.is_empty() {
         return Err("文字内容不能为空");
     }
 
+    // 校验：总长度不能超过限制
     let total_len: usize = segments.iter().map(|s| s.len()).sum();
     if total_len > MAX_CONTENT_LENGTH {
         return Err("文字内容总长度不能超过 5000 字符");

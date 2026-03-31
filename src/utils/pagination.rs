@@ -1,13 +1,21 @@
+//! 分页计算模块
+//!
+//! 提供列表页的页码归一化和偏移量计算，以及总页数计算。
+//! 每页大小由 `PAGE_SIZE` 常量定义。
+
 use super::PAGE_SIZE;
 
-/// Calculate page number and offset from optional page parameter.
+/// 根据可选的页码参数计算归一化的页码和数据库查询偏移量。
+///
+/// 页码范围限制在 `[1, 100000]`，`None` 时默认为第 1 页。
+/// 返回 `(page, offset)` 元组，其中 `offset = (page - 1) * PAGE_SIZE`。
 pub fn calc_page_offset(page: Option<i64>) -> (i64, i64) {
     let page = page.unwrap_or(1).clamp(1, 100_000);
     let offset = (page - 1) * PAGE_SIZE;
     (page, offset)
 }
 
-/// Calculate total pages from total record count.
+/// 根据总记录数计算总页数（向上取整）。
 pub fn calc_total_pages(total: i64) -> i64 {
     (total + PAGE_SIZE - 1) / PAGE_SIZE
 }

@@ -1,4 +1,17 @@
-/// Generate HMAC-SHA256 hash (first 8 bytes = 16 hex chars)
+//! HMAC 签名与验证模块
+//!
+//! 基于 HMAC-SHA256 生成和验证二维码提取 URL 中的哈希签名。
+//! 使用 `subtle` 库进行恒定时间比较，防止时序攻击。
+//! 支持新版 16 字符哈希和旧版 8 字符哈希的向后兼容。
+
+/// 生成提取 URL 的 HMAC-SHA256 签名哈希。
+///
+/// 使用 `uuid + salt` 计算 HMAC-SHA256，取前 8 字节（64 位）
+/// 输出为 16 个十六进制字符的字符串。
+///
+/// # 参数
+/// - `uuid` - 二维码的唯一标识
+/// - `salt` - HMAC 签名盐值（来自配置 `server.extract_salt`）
 pub fn generate_extract_hash(uuid: &str, salt: &str) -> String {
     use hmac::{Hmac, Mac};
     use sha2::Sha256;
@@ -14,7 +27,17 @@ pub fn generate_extract_hash(uuid: &str, salt: &str) -> String {
     hex
 }
 
-/// Verify extract hash with constant-time comparison and optional legacy (8-char) support
+/// 验证提取 URL 中的哈希签名，使用恒定时间比较防止时序攻击。
+///
+/// 支持两种哈希长度：
+/// - 16 字符（新版，64 位安全性）
+/// - 8 字符（旧版，仅在 `legacy_support` 为 `true` 时接受）
+///
+/// # 参数
+/// - `uuid` - 二维码的唯一标识
+/// - `hash` - URL 中的哈希值
+/// - `salt` - HMAC 签名盐值
+/// - `legacy_support` - 是否接受旧版 8 字符哈希
 pub fn verify_extract_hash(uuid: &str, hash: &str, salt: &str, legacy_support: bool) -> bool {
     use subtle::ConstantTimeEq;
 
